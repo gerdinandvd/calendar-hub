@@ -1,0 +1,91 @@
+services:
+  hub:
+    build: .
+    env_file:
+      - .env
+    volumes:
+      - hub-data:/data
+    networks:
+      - internal
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health')",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+    restart: unless-stopped
+
+  radicale:
+    image: tomsquest/docker-radicale:3.8.1.1
+    volumes:
+      - radicale-data:/data
+    networks:
+      - internal
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://127.0.0.1:5232"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 5s
+    restart: unless-stopped
+
+  caddy:
+    image: caddy:2.11.7
+    ports:
+      - "8080:80"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+    networks:
+      - internal
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1/"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 5s
+    restart: unless-stopped
+
+  litestream:
+    image: litestream/litestream:0.5.17
+    entrypoint: ["/bin/sh", "-c"]
+    command: ["/usr/local/bin/litestream version && exec sleep infinity"]
+    volumes:
+      - ./deploy/litestream.yml:/etc/litestream.yml:ro
+    networks:
+      - internal
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/litestream", "version"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 5s
+    restart: unless-stopped
+
+  backup:
+    image: kopia/kopia:0.23.1
+    entrypoint: ["/bin/sh", "-c"]
+    command: ["/bin/kopia --version && exec sleep infinity"]
+    volumes:
+      - ./deploy/kopia.yml:/etc/kopia.yml:ro
+    networks:
+      - internal
+    healthcheck:
+      test: ["CMD", "/bin/kopia", "--version"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 5s
+    restart: unless-stopped
+
+networks:
+  internal:
+
+volumes:
+  hub-data:
+  radicale-data:

@@ -1,0 +1,3 @@
+:80 {
+	respond "calendar-hub skeleton" 200
+}
