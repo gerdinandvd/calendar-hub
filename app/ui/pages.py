@@ -12,9 +12,12 @@ from app.api.sources import (
     SourceFailure,
     create_source,
     delete_source,
+    endpoint_url,
     get_source,
     list_calendars,
     list_sources,
+    list_sync_status,
+    rotate_webhook_secret,
     update_source,
 )
 
@@ -51,28 +54,33 @@ def sources_page(request: Request) -> HTMLResponse:
 
 
 @router.get("/sources/new")
-def new_source_page(request: Request) -> HTMLResponse:
-    return _form_page(request, mode="create", draft=_draft("", "Europe/Amsterdam"), errors=_blank_errors())
+def new_source_page(request: Request, kind: str = "private") -> HTMLResponse:
+    mode = "webhook" if kind == "webhook" else "create"
+    return _form_page(request, mode=mode, draft=_draft("", "Europe/Amsterdam"), errors=_blank_errors())
 
 
 @router.post("/sources")
-async def create_source_page(request: Request) -> HTMLResponse:
+async def create_source_page(request: Request, kind: str = "private") -> HTMLResponse:
     form = await _form(request)
+    chosen = "webhook" if kind == "webhook" else "private"
     result = create_source(
         request.app.state.engine,
         request.app.state.radicale,
         name=form.get("name", ""),
         timezone_name=None,
         enabled=None,
-        kind="private",
+        kind=chosen,
+        reveal_secret=chosen == "webhook",
     )
     if isinstance(result, SourceFailure):
         return _form_fragment(
             request,
-            mode="create",
+            mode="webhook" if chosen == "webhook" else "create",
             draft=_draft(form.get("name", ""), "Europe/Amsterdam"),
             errors=_errors(result),
         )
+    if chosen == "webhook":
+        return _secret_fragment(request, result["id"], result.get("webhook_secret", ""))
     return _redirect("/sources")
 
 
@@ -86,6 +94,8 @@ def edit_source_page(source_id: str, request: Request) -> HTMLResponse:
         mode="edit",
         draft=_draft(found["name"], found["timezone"], found["id"]),
         errors=_blank_errors(),
+        kind_label=found["kind_label"],
+        webhook=_webhook_view(found),
     )
 
 
@@ -102,11 +112,14 @@ async def update_source_page(source_id: str, request: Request) -> HTMLResponse:
     if isinstance(result, SourceFailure):
         if result.status == 404:
             raise HTTPException(status_code=404)
+        found = get_source(request.app.state.engine, source_id)
+        label = found["kind_label"] if found is not None else "Private"
         return _form_fragment(
             request,
             mode="edit",
             draft=_draft(form.get("name", ""), form.get("timezone", ""), source_id),
             errors=_errors(result),
+            kind_label=label,
         )
     return _redirect("/sources")
 
@@ -146,6 +159,16 @@ async def delete_source_page(source_id: str, request: Request) -> HTMLResponse:
     return _sources_panel(request, "")
 
 
+@router.post("/sources/{source_id}/rotate-secret")
+def rotate_secret_page(source_id: str, request: Request) -> HTMLResponse:
+    result = rotate_webhook_secret(request.app.state.engine, source_id, reveal=True)
+    if isinstance(result, SourceFailure):
+        if result.status == 404:
+            raise HTTPException(status_code=404)
+        return _panel(request, source_id, "", result.detail)
+    return _secret_panel(request, source_id, result.get("webhook_secret", ""))
+
+
 @router.get("/calendars")
 def calendars_page(request: Request) -> HTMLResponse:
     return _page(
@@ -155,6 +178,27 @@ def calendars_page(request: Request) -> HTMLResponse:
             "title": "Calendars",
             "calendars": list_calendars(request.app.state.engine),
         },
+    )
+
+
+@router.get("/sync")
+def sync_page(request: Request) -> HTMLResponse:
+    return _page(
+        request,
+        "sync.html",
+        {
+            "title": "Sync",
+            "sources": list_sync_status(request.app.state.engine),
+        },
+    )
+
+
+@router.get("/sync/panel")
+def sync_panel(request: Request) -> HTMLResponse:
+    return templates.TemplateResponse(
+        request,
+        "sync_panel.html",
+        {"sources": list_sync_status(request.app.state.engine)},
     )
 
 
@@ -172,25 +216,114 @@ def _page(request: Request, name: str, context: dict) -> HTMLResponse:
     return templates.TemplateResponse(request, name, context)
 
 
-def _form_page(request: Request, *, mode: str, draft: dict, errors: dict[str, str]) -> HTMLResponse:
-    return _page(request, "source_page.html", _form_context(mode, draft, errors))
+def _form_page(
+    request: Request,
+    *,
+    mode: str,
+    draft: dict,
+    errors: dict[str, str],
+    kind_label: str = "Private",
+    webhook: dict | None = None,
+) -> HTMLResponse:
+    return _page(
+        request,
+        "source_page.html",
+        _form_context(mode, draft, errors, kind_label=kind_label, webhook=webhook),
+    )
 
 
-def _form_fragment(request: Request, *, mode: str, draft: dict, errors: dict[str, str]) -> HTMLResponse:
-    return templates.TemplateResponse(request, "source_form.html", _form_context(mode, draft, errors))
+def _form_fragment(
+    request: Request,
+    *,
+    mode: str,
+    draft: dict,
+    errors: dict[str, str],
+    kind_label: str = "Private",
+) -> HTMLResponse:
+    name = "webhook_form.html" if mode == "webhook" else "source_form.html"
+    return templates.TemplateResponse(
+        request,
+        name,
+        _form_context(mode, draft, errors, kind_label=kind_label),
+    )
 
 
-def _form_context(mode: str, draft: dict, errors: dict[str, str]) -> dict:
+def _form_context(
+    mode: str,
+    draft: dict,
+    errors: dict[str, str],
+    *,
+    kind_label: str = "Private",
+    webhook: dict | None = None,
+) -> dict:
     editing = mode == "edit"
+    webhook_mode = mode == "webhook"
+    if webhook_mode:
+        title = "Add a webhook"
+        heading = "Add a webhook"
+        submit_label = "Add a webhook"
+        action = "/sources?kind=webhook"
+        label = "Webhook"
+    elif editing:
+        title = "Edit source"
+        heading = "Edit source"
+        submit_label = "Save"
+        action = f"/sources/{draft['id']}"
+        label = kind_label
+    else:
+        title = "Add a source"
+        heading = "Add a source"
+        submit_label = "Add a source"
+        action = "/sources"
+        label = "Private"
     return {
-        "title": "Edit source" if editing else "Add a source",
-        "heading": "Edit source" if editing else "Add a source",
-        "submit_label": "Save" if editing else "Add a source",
-        "action": f"/sources/{draft['id']}" if editing else "/sources",
+        "title": title,
+        "heading": heading,
+        "submit_label": submit_label,
+        "action": action,
         "mode": mode,
+        "kind_label": label,
         "draft": draft,
         "errors": errors,
+        "webhook_url": "" if webhook is None else webhook["url"],
+        "webhook_secret": "",
+        "source_id": draft["id"],
+        "error": "",
     }
+
+
+def _secret_fragment(request: Request, source_id: str, secret: str) -> HTMLResponse:
+    response = templates.TemplateResponse(
+        request,
+        "webhook_created.html",
+        {
+            "webhook_url": endpoint_url(source_id),
+            "webhook_secret": secret,
+            "source_id": source_id,
+            "error": "",
+        },
+    )
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+def _secret_panel(request: Request, source_id: str, secret: str) -> HTMLResponse:
+    response = _panel(request, source_id, secret, "")
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+def _panel(request: Request, source_id: str, secret: str, error: str) -> HTMLResponse:
+    return templates.TemplateResponse(
+        request,
+        "webhook_panel.html",
+        {
+            "webhook_url": endpoint_url(source_id),
+            "webhook_secret": secret,
+            "source_id": source_id,
+            "error": error,
+        },
+    )
 
 
 def _sources_panel(request: Request, error: str) -> HTMLResponse:
@@ -218,6 +351,12 @@ def _errors(failure: SourceFailure) -> dict[str, str]:
         "name": failure.fields.get("name", ""),
         "timezone": failure.fields.get("timezone", ""),
     }
+
+
+def _webhook_view(found: dict) -> dict | None:
+    if found["kind"] != "webhook":
+        return None
+    return {"url": endpoint_url(found["id"])}
 
 
 def _redirect(url: str) -> HTMLResponse:

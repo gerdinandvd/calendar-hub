@@ -8,7 +8,11 @@ from fastapi import FastAPI
 from app.access import install_access
 from app.api.caldav_info import router as caldav_router
 from app.api.health import router as health_router
+from app.api.sources import ensure_sync_states
 from app.api.sources import router as sources_router
+from app.api.sync import router as sync_router
+from app.api.webhooks import RateLimiter
+from app.api.webhooks import router as webhooks_router
 from app.db.models import Base
 from app.db.session import make_engine
 from app.log import configure_logging
@@ -25,6 +29,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         with engine.connect() as connection:
             connection.exec_driver_sql("SELECT 1")
         Base.metadata.create_all(engine)
+        ensure_sync_states(engine)
+        app.state.webhook_rates = RateLimiter()
         yield
     finally:
         engine.dispose()
@@ -36,6 +42,8 @@ def create_app() -> FastAPI:
     install_access(application)
     application.include_router(health_router)
     application.include_router(sources_router)
+    application.include_router(sync_router)
+    application.include_router(webhooks_router)
     application.include_router(caldav_router)
     application.include_router(pages_router)
     return application

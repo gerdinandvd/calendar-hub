@@ -59,16 +59,12 @@ def test_html_mutation_without_hx_request_does_not_run(tmp_path: Path, monkeypat
 
 
 def test_webhook_is_exempt_from_json_requirement(tmp_path: Path, monkeypatch) -> None:
-    hit = {"value": False}
     with _client(tmp_path, monkeypatch) as client:
-        @client.app.post("/api/webhooks/source-1")
-        def receive() -> dict[str, bool]:
-            hit["value"] = True
-            return {"ok": True}
-
         response = client.post("/api/webhooks/source-1", content=b"raw")
-        assert response.status_code == 200
-        assert hit["value"] is True
+        assert response.status_code != 415
+        assert response.status_code == 404
+        assert "Content-Type must be application/json." not in response.text
+        assert "Traceback" not in response.text
 
 
 def test_unexpected_error_hides_cause_and_traceback(tmp_path: Path, monkeypatch, caplog) -> None:

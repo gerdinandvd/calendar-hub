@@ -105,3 +105,102 @@ def test_failed_proppatch_removes_the_new_collection() -> None:
     finally:
         server.shutdown()
         server.server_close()
+
+
+class _EventHandler(BaseHTTPRequestHandler):
+    calls: list[tuple[str, str | None, str | None]] = []
+    put_statuses = [204]
+    get_status = 200
+    etags = ['"v1"']
+
+    def do_GET(self) -> None:
+        self.calls.append(("GET", None, None))
+        body = b"existing"
+        etag = self.etags.pop(0) if self.etags else '"v1"'
+        self.send_response(self.get_status)
+        if self.get_status == 200:
+            self.send_header("ETag", etag)
+            self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        if self.get_status == 200:
+            self.wfile.write(body)
+
+    def do_PUT(self) -> None:
+        length = int(self.headers.get("Content-Length", "0"))
+        if length:
+            self.rfile.read(length)
+        match = self.headers.get("If-Match")
+        content_type = self.headers.get("Content-Type")
+        self.calls.append(("PUT", match, content_type))
+        status = self.put_statuses.pop(0) if self.put_statuses else 204
+        self.send_response(status)
+        self.end_headers()
+
+    def do_DELETE(self) -> None:
+        self.calls.append(("DELETE", None, None))
+        self.send_response(404)
+        self.end_headers()
+
+    def log_message(self, format: str, *args) -> None:
+        return
+
+
+def _event_server() -> tuple[ThreadingHTTPServer, str]:
+    _EventHandler.calls = []
+    _EventHandler.put_statuses = [204]
+    _EventHandler.get_status = 200
+    _EventHandler.etags = ['"v1"']
+    server = ThreadingHTTPServer(("127.0.0.1", 0), _EventHandler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    port = server.server_address[1]
+    return server, f"http://127.0.0.1:{port}"
+
+
+def test_put_retries_once_after_etag_conflict(caplog) -> None:
+    server, base = _event_server()
+    _EventHandler.put_statuses = [412, 204]
+    _EventHandler.etags = ['"v1"', '"v2"']
+    try:
+        client = RadicaleClient(base, "hub-internal", "secret")
+        with caplog.at_level("ERROR", logger="app"):
+            client.put_event("/owner/one/event.ics", b"BEGIN:VCALENDAR\r\nEND:VCALENDAR\r\n")
+        methods = [call[0] for call in _EventHandler.calls]
+        assert methods == ["GET", "PUT", "GET", "PUT"]
+        assert _EventHandler.calls[1][1] == '"v1"'
+        assert _EventHandler.calls[3][1] == '"v2"'
+        assert _EventHandler.calls[1][2].startswith("text/calendar")
+        assert "status=412" not in caplog.text
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+def test_failed_etag_retry_raises_and_logs_status(caplog) -> None:
+    server, base = _event_server()
+    _EventHandler.put_statuses = [412, 500]
+    try:
+        client = RadicaleClient(base, "hub-internal", "secret")
+        with caplog.at_level("ERROR", logger="app"):
+            try:
+                client.put_event("/owner/one/event.ics", b"BEGIN:VCALENDAR\r\nEND:VCALENDAR\r\n")
+                raised = False
+            except RadicaleError:
+                raised = True
+        assert raised
+        assert [call[0] for call in _EventHandler.calls] == ["GET", "PUT", "GET", "PUT"]
+        assert "radicale_error method=PUT status=500" in caplog.text
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+def test_delete_event_accepts_a_missing_resource() -> None:
+    server, base = _event_server()
+    try:
+        client = RadicaleClient(base, "hub-internal", "secret")
+        client.delete_event("/owner/one/missing.ics")
+        assert _EventHandler.calls[-1][0] == "DELETE"
+    finally:
+        server.shutdown()
+        server.server_close()

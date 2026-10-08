@@ -1,4 +1,4 @@
-"""CalDAV collection writes. No branch on source kind, and no event bodies."""
+"""CalDAV collection and event writes. No branch on source kind."""
 
 from __future__ import annotations
 
@@ -62,6 +62,36 @@ class RadicaleClient:
     def delete_collection(self, path: str) -> None:
         self._request("DELETE", path, None, ok={200, 202, 204, 404})
 
+    def put_event(self, path: str, body: bytes) -> None:
+        status = self._put(path, body, self._lookup_etag(path))
+        if status == 412:
+            status = self._put(path, body, self._lookup_etag(path))
+        if status not in {200, 201, 204}:
+            logger.error("radicale_error method=PUT status=%s", status)
+            raise RadicaleError("The calendar could not be saved.")
+
+    def delete_event(self, path: str) -> None:
+        self._request("DELETE", path, None, ok={200, 202, 204, 404})
+
+    def _lookup_etag(self, path: str) -> str | None:
+        status, headers, _payload = self._call("GET", path, None)
+        if status == 404:
+            return None
+        if status != 200:
+            logger.error("radicale_error method=GET status=%s", status)
+            raise RadicaleError("The calendar could not be saved.")
+        return headers.get("etag")
+
+    def _put(self, path: str, body: bytes, etag: str | None) -> int:
+        status, _headers, _payload = self._call(
+            "PUT",
+            path,
+            body,
+            content_type="text/calendar; charset=utf-8",
+            if_match=etag,
+        )
+        return status
+
     def _request(
         self,
         method: str,
@@ -71,6 +101,20 @@ class RadicaleClient:
         ok: set[int],
         check_propstat: bool = False,
     ) -> None:
+        status, _headers, payload = self._call(method, path, body)
+        if status not in ok or (check_propstat and _propstat_failed(payload)):
+            logger.error("radicale_error method=%s status=%s", method, status)
+            raise RadicaleError("The calendar could not be saved.")
+
+    def _call(
+        self,
+        method: str,
+        path: str,
+        body: bytes | None,
+        *,
+        content_type: str | None = None,
+        if_match: str | None = None,
+    ) -> tuple[int, dict[str, str], bytes]:
         parsed = urlsplit(self.base_url)
         if parsed.scheme != "http" or not parsed.hostname:
             logger.error("radicale_error method=%s status=none", method)
@@ -79,7 +123,9 @@ class RadicaleClient:
         token = base64.b64encode(f"{self.username}:{self.password}".encode()).decode("ascii")
         headers = {"Authorization": f"Basic {token}"}
         if body is not None:
-            headers["Content-Type"] = "application/xml; charset=utf-8"
+            headers["Content-Type"] = content_type or "application/xml; charset=utf-8"
+        if if_match:
+            headers["If-Match"] = if_match
         connection = http.client.HTTPConnection(parsed.hostname, port, timeout=10)
         try:
             try:
@@ -87,14 +133,13 @@ class RadicaleClient:
                 response = connection.getresponse()
                 payload = response.read()
                 status = response.status
+                found = {name.lower(): value for name, value in response.getheaders()}
             except OSError:
                 logger.error("radicale_error method=%s status=none", method)
                 raise RadicaleError("The calendar could not be saved.") from None
         finally:
             connection.close()
-        if status not in ok or (check_propstat and _propstat_failed(payload)):
-            logger.error("radicale_error method=%s status=%s", method, status)
-            raise RadicaleError("The calendar could not be saved.")
+        return status, found, payload
 
 
 def _parent_path(path: str) -> str:

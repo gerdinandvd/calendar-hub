@@ -3,9 +3,11 @@
 import base64
 import http.client
 import json
+import re
 import socket
 import ssl
 import subprocess
+import time
 from collections.abc import Iterator
 from pathlib import Path
 from urllib.parse import quote, urlparse
@@ -377,3 +379,102 @@ def test_private_collection_roundtrip(stack: dict[str, str]) -> None:
     assert missing["error"] == "not_found"
     status, props = _propfind(collection, owner)
     assert status != 207
+
+
+def _exchange(
+    method: str,
+    path: str,
+    headers: dict[str, str] | None = None,
+    body: bytes | None = None,
+) -> tuple[int, dict[str, str], bytes]:
+    context = ssl._create_unverified_context()
+    connection = http.client.HTTPSConnection(
+        "localhost",
+        HTTPS_PORT,
+        context=context,
+        timeout=15,
+    )
+    try:
+        connection.request(method, path, body=body, headers=headers or {})
+        response = connection.getresponse()
+        payload = response.read()
+        found = {name.lower(): value for name, value in response.getheaders()}
+        return response.status, found, payload
+    finally:
+        connection.close()
+
+
+@pytest.mark.integration
+def test_webhook_upsert_is_readable_via_caldav(stack: dict[str, str]) -> None:
+    owner = _basic(stack["HUB_USER"], stack["HUB_PASSWORD"])
+    status, headers, raw = _exchange(
+        "POST",
+        "/sources?kind=webhook",
+        {
+            "Authorization": owner,
+            "HX-Request": "true",
+            "Content-Type": "application/x-www-form-urlencoded",
+        },
+        b"name=Webhook+feed",
+    )
+    assert status == 200, raw[:300]
+    assert headers.get("cache-control") == "no-store"
+    secret_match = re.search(br'id="webhook-secret-value"[^>]*>([^<]+)', raw)
+    url_match = re.search(br'id="webhook-url">([^<]+)', raw)
+    assert secret_match is not None
+    assert url_match is not None
+    secret = secret_match.group(1).decode()
+    source_id = url_match.group(1).decode().rstrip("/").rsplit("/", 1)[-1]
+    status, page, _ = _https("GET", "/sources", {"Authorization": owner})
+    assert status == 200
+    assert secret.encode() not in page
+
+    payload = {
+        "id": "ext-1",
+        "action": "upsert",
+        "summary": "Webhook title",
+        "start": "2026-10-07T09:00:15",
+        "end": "2026-10-07T10:00:15",
+        "timezone": "Europe/Amsterdam",
+    }
+    started = time.monotonic()
+    status, created, _ = _https(
+        "POST",
+        f"/api/webhooks/{source_id}",
+        {"X-Webhook-Secret": secret, "Content-Type": "application/json"},
+        json.dumps(payload).encode(),
+    )
+    assert status == 200, created
+    status, listed = _json_call("GET", "/api/sources", owner)
+    assert status == 200
+    source = next(item for item in listed["sources"] if item["id"] == source_id)
+    collection = urlparse(source["collection_url"]).path
+    list_body = (
+        "<?xml version='1.0' encoding='utf-8'?>"
+        "<D:propfind xmlns:D='DAV:'><D:prop><D:getetag/></D:prop></D:propfind>"
+    ).encode()
+    status, listing, _ = _https(
+        "PROPFIND",
+        collection,
+        {"Authorization": owner, "Depth": "1", "Content-Type": "application/xml"},
+        list_body,
+    )
+    assert status == 207, listing[:300]
+    hrefs = re.findall(br"href>([^<]+\.ics)", listing, flags=re.IGNORECASE)
+    assert hrefs
+    stored = b""
+    for href in hrefs:
+        path = href.decode()
+        if "://" in path:
+            path = urlparse(path).path
+        if not path.startswith("/"):
+            path = collection + path
+        status, stored, _ = _https("GET", path, {"Authorization": owner})
+        if status == 200 and b"Webhook title" in stored:
+            break
+    else:
+        raise AssertionError(listing[:500])
+    assert time.monotonic() - started < 5
+    assert b"DTSTART;TZID=Europe/Amsterdam:20261007T090015" in stored
+    assert b"DTEND;TZID=Europe/Amsterdam:20261007T100015" in stored
+    assert b"SUMMARY:Webhook title" in stored

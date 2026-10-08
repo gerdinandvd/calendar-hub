@@ -1,0 +1,37 @@
+<div id="sync-panel" hx-get="/sync/panel" hx-trigger="every 10s" hx-swap="outerHTML">
+  <h1>Sync</h1>
+  {% if not sources %}
+  <p>There is no source yet.</p>
+  {% else %}
+  <table>
+    <thead>
+      <tr>
+        <th>Name</th>
+        <th>Kind</th>
+        <th>Status</th>
+        <th>Last success</th>
+        <th>Last error</th>
+        <th>Error</th>
+        <th>Seen</th>
+        <th>Upserted</th>
+        <th>Deleted</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for source in sources %}
+      <tr>
+        <td>{{ source.name }}</td>
+        <td>{{ source.kind_label }}</td>
+        <td>{{ source.status_label }}</td>
+        <td>{% if source.last_success_at %}{{ source.last_success_at }}{% endif %}</td>
+        <td>{% if source.last_error_at %}{{ source.last_error_at }}{% endif %}</td>
+        <td>{{ source.last_error_message or "" }}</td>
+        <td>{% if source.events_seen != None %}{{ source.events_seen }}{% endif %}</td>
+        <td>{% if source.events_upserted != None %}{{ source.events_upserted }}{% endif %}</td>
+        <td>{% if source.events_deleted != None %}{{ source.events_deleted }}{% endif %}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+</div>

@@ -1,6 +1,7 @@
-"""Create, change, and delete private sources, and their collections."""
+"""Create, change, and delete sources, and their collections."""
 
 import os
+import secrets
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -9,22 +10,29 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from fastapi import APIRouter, Request
 from pydantic import BaseModel, ConfigDict
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session
 
 from app.access import json_error
-from app.db.models import Source
+from app.db.models import EventMapping, Source, SourceSecret, SyncState
 from app.log import log_mutation
 from app.radicale.client import RadicaleClient, RadicaleError
+from app.secrets import SecretKeyError, decrypt, encrypt, equal
 
 router = APIRouter()
 
 MAX_SOURCES = 20
 DEFAULT_TIMEZONE = "Europe/Amsterdam"
-STATUS = "na"
-STATUS_LABEL = "not applicable"
+CREATABLE_KINDS = frozenset({"private", "webhook"})
+STATUS_LABELS = {
+    "idle": "not yet started",
+    "running": "busy",
+    "ok": "succeeded",
+    "error": "error",
+    "na": "not applicable",
+}
 
 
 @dataclass(frozen=True)
@@ -75,6 +83,7 @@ def create_source(
     timezone_name: str | None,
     enabled: int | None,
     kind: str,
+    reveal_secret: bool = False,
 ) -> dict | SourceFailure:
     failure = _validate_new(kind, name, timezone_name, enabled)
     if failure is not None:
@@ -82,6 +91,14 @@ def create_source(
     cleaned = name.strip()
     zone = (timezone_name or DEFAULT_TIMEZONE).strip()
     bit = 1 if enabled is None else enabled
+    plaintext = ""
+    ciphertext = None
+    if kind == "webhook":
+        try:
+            plaintext = secrets.token_urlsafe(32)
+            ciphertext = encrypt(plaintext)
+        except SecretKeyError as exc:
+            return _failure(500, str(exc))
     try:
         owner = _owner()
         _host()
@@ -94,7 +111,7 @@ def create_source(
             return _field("name", "That name is already in use.")
     source_id = str(uuid.uuid4())
     path = f"/{quote(owner, safe='')}/{source_id}/"
-    color = KINDS["private"].color
+    color = KINDS[kind].color
     try:
         radicale.create_collection(path, cleaned, color)
     except RadicaleError:
@@ -106,7 +123,7 @@ def create_source(
                 raise _LimitReached()
             row = Source(
                 id=source_id,
-                kind="private",
+                kind=kind,
                 name=cleaned,
                 color=color,
                 collection_path=path,
@@ -119,9 +136,13 @@ def create_source(
                 created_at=stamp,
                 updated_at=stamp,
             )
+            state = _new_state(source_id, kind)
             session.add(row)
+            session.add(state)
+            if ciphertext is not None:
+                session.add(_new_secret(source_id, ciphertext))
             session.flush()
-            payload = _public(row)
+            payload = _public(row, state)
     except _LimitReached:
         _drop_collection(radicale, path)
         return _failure(422, "You can add at most 20 sources.")
@@ -132,6 +153,8 @@ def create_source(
         _drop_collection(radicale, path)
         raise
     log_mutation(actor="owner", source_id=source_id, message="created source")
+    if reveal_secret and plaintext:
+        payload = {**payload, "webhook_secret": plaintext}
     return payload
 
 
@@ -177,7 +200,7 @@ def update_source(
             row.enabled = new_enabled
             row.updated_at = _now()
             session.flush()
-            payload = _public(row)
+            payload = _public(row, session.get(SyncState, source_id))
     except _Missing:
         if new_name != current_name:
             _restore_name(radicale, current_path, current_name, current_color)
@@ -213,6 +236,9 @@ def delete_source(
     except RadicaleError:
         return _failure(500, "The calendar could not be deleted.")
     with Session(engine) as session, session.begin():
+        session.execute(delete(EventMapping).where(EventMapping.source_id == source_id))
+        session.execute(delete(SourceSecret).where(SourceSecret.source_id == source_id))
+        session.execute(delete(SyncState).where(SyncState.source_id == source_id))
         row = session.get(Source, source_id)
         if row is not None:
             session.delete(row)
@@ -225,13 +251,84 @@ def get_source(engine: Engine, source_id: str) -> dict | None:
         row = session.get(Source, source_id)
         if row is None:
             return None
-        return _public(row)
+        return _public(row, session.get(SyncState, source_id))
 
 
 def list_sources(engine: Engine) -> list[dict]:
     with Session(engine) as session:
         rows = session.scalars(select(Source).order_by(Source.created_at, Source.id)).all()
-        return [_public(row) for row in rows]
+        states = _states(session)
+        return [_public(row, states.get(row.id)) for row in rows]
+
+
+def list_sync_status(engine: Engine) -> list[dict]:
+    with Session(engine) as session:
+        rows = session.scalars(select(Source).order_by(Source.created_at, Source.id)).all()
+        states = _states(session)
+        return [_sync_public(row, states.get(row.id)) for row in rows]
+
+
+def rotate_webhook_secret(
+    engine: Engine,
+    source_id: str,
+    *,
+    reveal: bool = False,
+) -> dict | SourceFailure:
+    with Session(engine) as session:
+        row = session.get(Source, source_id)
+        if row is None:
+            return _failure(404, "Not found.")
+        if row.kind != "webhook":
+            return _failure(
+                422,
+                "Only a webhook source can rotate a secret.",
+                error="rotate_not_supported",
+            )
+    try:
+        plaintext = secrets.token_urlsafe(32)
+        ciphertext = encrypt(plaintext)
+    except SecretKeyError as exc:
+        return _failure(500, str(exc))
+    with Session(engine) as session, session.begin():
+        row = session.get(Source, source_id)
+        if row is None or row.kind != "webhook":
+            return _failure(404, "Not found.")
+        secret = session.get(SourceSecret, source_id)
+        if secret is None:
+            secret = _new_secret(source_id, ciphertext)
+            session.add(secret)
+        else:
+            secret.webhook_secret = ciphertext
+        row.updated_at = _now()
+    log_mutation(actor="owner", source_id=source_id, message="rotated webhook secret")
+    payload: dict = {"id": source_id, "rotated": True}
+    if reveal:
+        payload["webhook_secret"] = plaintext
+    return payload
+
+
+def webhook_secret_matches(engine: Engine, source_id: str, provided: str) -> bool:
+    with Session(engine) as session:
+        row = session.get(SourceSecret, source_id)
+        stored = row.webhook_secret if row is not None else None
+    if not stored:
+        equal(provided, "missing-webhook-secret")
+        return False
+    return equal(decrypt(stored), provided)
+
+
+def endpoint_url(source_id: str) -> str:
+    return f"https://{_host()}/api/webhooks/{source_id}"
+
+
+def ensure_sync_states(engine: Engine) -> None:
+    with Session(engine) as session, session.begin():
+        rows = session.scalars(select(Source)).all()
+        existing = set(session.scalars(select(SyncState.source_id)).all())
+        for row in rows:
+            if row.id in existing:
+                continue
+            session.add(_new_state(row.id, row.kind))
 
 
 def list_calendars(engine: Engine) -> list[dict]:
@@ -289,6 +386,12 @@ def patch_source(source_id: str, body: SourcePatch, request: Request) -> dict:
     return _json(result)
 
 
+@router.post("/api/sources/{source_id}/rotate-secret")
+def rotate_secret(source_id: str, request: Request) -> dict:
+    result = rotate_webhook_secret(request.app.state.engine, source_id, reveal=False)
+    return _json(result)
+
+
 @router.delete("/api/sources/{source_id}")
 def remove_source(source_id: str, request: Request, confirm: bool = False) -> dict:
     result = delete_source(
@@ -325,15 +428,23 @@ def _json(result: dict | SourceFailure) -> dict:
     return result
 
 
-def _failure(status: int, detail: str, fields: dict[str, str] | None = None) -> SourceFailure:
+def _failure(
+    status: int,
+    detail: str,
+    fields: dict[str, str] | None = None,
+    *,
+    error: str | None = None,
+) -> SourceFailure:
     found = fields or {}
-    if status == 404:
-        error = "not_found"
+    if error is not None:
+        code = error
+    elif status == 404:
+        code = "not_found"
     elif status >= 500:
-        error = "internal_error"
+        code = "internal_error"
     else:
-        error = "invalid_request"
-    return SourceFailure(status=status, error=error, detail=detail, fields=found)
+        code = "invalid_request"
+    return SourceFailure(status=status, error=code, detail=detail, fields=found)
 
 
 def _field(name: str, message: str) -> SourceFailure:
@@ -346,8 +457,8 @@ def _validate_new(
     timezone_name: str | None,
     enabled: int | None,
 ) -> SourceFailure | None:
-    if kind != "private":
-        return _failure(422, "Only a private source can be created.")
+    if kind not in CREATABLE_KINDS:
+        return _failure(422, "Only a private or webhook source can be created.")
     fields: dict[str, str] = {}
     if not name.strip():
         fields["name"] = "Enter a name."
@@ -413,8 +524,48 @@ def _name_taken(session: Session, name: str, ignore_id: str | None = None) -> bo
     return session.scalar(stmt) is not None
 
 
-def _public(row: Source) -> dict:
+def _states(session: Session) -> dict[str, SyncState]:
+    rows = session.scalars(select(SyncState)).all()
+    return {row.source_id: row for row in rows}
+
+
+def _new_state(source_id: str, kind: str) -> SyncState:
+    return SyncState(
+        source_id=source_id,
+        status="na" if kind == "private" else "idle",
+        cursor=None,
+        last_started_at=None,
+        last_success_at=None,
+        last_error_at=None,
+        last_error_message=None,
+        events_seen=0,
+        events_upserted=0,
+        events_deleted=0,
+    )
+
+
+def _new_secret(source_id: str, ciphertext: str) -> SourceSecret:
+    return SourceSecret(
+        source_id=source_id,
+        webhook_secret=ciphertext,
+        oauth_refresh_token=None,
+        oauth_access_token=None,
+        oauth_expiry=None,
+        ics_authorization_header=None,
+    )
+
+
+def _status_code(row: Source, state: SyncState | None) -> str:
+    if row.kind == "private":
+        return "na"
+    if state is None:
+        return "idle"
+    return state.status
+
+
+def _public(row: Source, state: SyncState | None) -> dict:
     info = KINDS.get(row.kind, KindInfo(row.color, row.color, row.kind))
+    status = _status_code(row, state)
     return {
         "id": row.id,
         "kind": row.kind,
@@ -426,10 +577,29 @@ def _public(row: Source) -> dict:
         "collection_url": f"https://{_host()}/radicale{row.collection_path}",
         "enabled": row.enabled,
         "timezone": row.timezone,
-        "status": STATUS,
-        "status_label": STATUS_LABEL,
+        "status": status,
+        "status_label": STATUS_LABELS[status],
         "created_at": row.created_at,
         "updated_at": row.updated_at,
+    }
+
+
+def _sync_public(row: Source, state: SyncState | None) -> dict:
+    status = _status_code(row, state)
+    private = status == "na"
+    return {
+        "id": row.id,
+        "name": row.name,
+        "kind": row.kind,
+        "kind_label": KINDS.get(row.kind, KindInfo(row.color, row.color, row.kind)).label,
+        "status": status,
+        "status_label": STATUS_LABELS[status],
+        "last_success_at": None if private or state is None else state.last_success_at,
+        "last_error_at": None if private or state is None else state.last_error_at,
+        "last_error_message": None if private or state is None else state.last_error_message,
+        "events_seen": None if private or state is None else state.events_seen,
+        "events_upserted": None if private or state is None else state.events_upserted,
+        "events_deleted": None if private or state is None else state.events_deleted,
     }
 
 

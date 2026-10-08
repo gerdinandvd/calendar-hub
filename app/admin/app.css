@@ -99,3 +99,8 @@ dialog::backdrop {
 form {
   margin: 0;
 }
+
+.secret {
+  overflow-wrap: anywhere;
+  font-family: Consolas, monospace;
+}
