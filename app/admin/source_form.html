@@ -1,0 +1,21 @@
+<div id="source-form">
+  {% if errors.top %}
+  <div id="form-error" tabindex="-1" role="alert">{{ errors.top }}</div>
+  {% endif %}
+  <form method="post" action="{{ action }}" hx-post="{{ action }}" hx-target="#source-form" hx-swap="outerHTML">
+    <h2>Private</h2>
+    <label for="name">Name</label>
+    <input id="name" name="name" value="{{ draft.name }}" {% if errors.name %}aria-invalid="true" aria-describedby="name-error"{% endif %}>
+    {% if errors.name %}
+    <p id="name-error">{{ errors.name }}</p>
+    {% endif %}
+    {% if mode == "edit" %}
+    <label for="timezone">Time zone</label>
+    <input id="timezone" name="timezone" value="{{ draft.timezone }}" {% if errors.timezone %}aria-invalid="true" aria-describedby="timezone-error"{% endif %}>
+    {% if errors.timezone %}
+    <p id="timezone-error">{{ errors.timezone }}</p>
+    {% endif %}
+    {% endif %}
+    <button type="submit">{{ submit_label }}</button>
+  </form>
+</div>

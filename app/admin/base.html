@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ title }}</title>
+  <link rel="stylesheet" href="/app.css">
+  <script src="/htmx.min.js"></script>
+</head>
+<body hx-on:htmx:after-settle="var node = document.getElementById('form-error'); if (node) node.focus();">
+  <header>
+    <p class="brand">Calendar hub</p>
+    <nav>
+      <a href="/">Home</a>
+      <a href="/sources">Sources</a>
+      <a href="/calendars">Calendars</a>
+    </nav>
+  </header>
+  <main>
+    {% block main %}{% endblock %}
+  </main>
+</body>
+</html>

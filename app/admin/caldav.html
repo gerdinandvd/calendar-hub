@@ -1,0 +1,25 @@
+<section id="caldav">
+  <h2>CalDAV</h2>
+  <p>The password is the password of HUB_USER.</p>
+  <dl>
+    <dt>Host</dt>
+    <dd>{{ caldav.host }}</dd>
+    <dt>Username</dt>
+    <dd>{{ caldav.username }}</dd>
+  </dl>
+  {% if caldav.collections %}
+  <ul>
+    {% for item in caldav.collections %}
+    <li>
+      <span class="swatch" style="background: {{ item.color }}"></span>
+      <span>{{ item.color_name }}</span>
+      <span>{{ item.name }}</span>
+      <a href="{{ item.url }}">{{ item.url }}</a>
+    </li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+  <p>Android uses DAVx⁵ to reach the calendar app on the device. DAVx⁵ syncs and the calendar app shows the event.</p>
+  <p>iOS uses the calendar app.</p>
+  <p>Thunderbird connects directly to CalDAV.</p>
+</section>

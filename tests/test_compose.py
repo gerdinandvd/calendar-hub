@@ -8,7 +8,7 @@ import ssl
 import subprocess
 from collections.abc import Iterator
 from pathlib import Path
-from urllib.parse import quote
+from urllib.parse import quote, urlparse
 
 import pytest
 
@@ -222,3 +222,158 @@ def test_public_access_requires_owner_and_blocks_internal_account(stack: dict[st
     )
     assert internal_direct.returncode == 0, internal_direct.stderr
     assert internal_direct.stdout.strip() == "207"
+
+
+def _json_call(
+    method: str,
+    path: str,
+    auth: str,
+    body: dict | None = None,
+) -> tuple[int, dict]:
+    payload = None if body is None else json.dumps(body).encode()
+    status, raw, _ = _https(
+        method,
+        path,
+        {"Authorization": auth, "Content-Type": "application/json"},
+        payload,
+    )
+    parsed = json.loads(raw) if raw else {}
+    return status, parsed
+
+
+def _propfind(path: str, auth: str) -> tuple[int, bytes]:
+    body = (
+        "<?xml version='1.0' encoding='utf-8'?>"
+        "<D:propfind xmlns:D='DAV:' xmlns:A='http://apple.com/ns/ical/'>"
+        "<D:prop><D:displayname/><A:calendar-color/></D:prop>"
+        "</D:propfind>"
+    ).encode()
+    status, payload, _ = _https(
+        "PROPFIND",
+        path,
+        {
+            "Authorization": auth,
+            "Depth": "0",
+            "Content-Type": "application/xml",
+        },
+        body,
+    )
+    return status, payload
+
+
+@pytest.mark.integration
+def test_private_collection_roundtrip(stack: dict[str, str]) -> None:
+    owner = _basic(stack["HUB_USER"], stack["HUB_PASSWORD"])
+    status, created = _json_call("POST", "/api/sources", owner, {"name": "Home"})
+    assert status == 201, created
+    source_id = created["id"]
+    assert created["collection_path"] == f"/{quote(stack['HUB_USER'])}/{source_id}/"
+    collection = urlparse(created["collection_url"]).path
+    assert collection.endswith(created["collection_path"])
+    assert stack["HUB_INTERNAL_USER"] not in created["collection_url"]
+    assert "password" not in created
+
+    status, props = _propfind(collection, owner)
+    assert status == 207, props[:300]
+    assert b"Home" in props
+    assert b"#1a73e8" in props
+
+    event = collection + "event-1.ics"
+    calendar = (
+        "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//calendar-hub//EN\r\n"
+        "BEGIN:VEVENT\r\nUID:event-1\r\nDTSTAMP:20261008T060000Z\r\n"
+        "DTSTART:20261008T090000Z\r\nDTEND:20261008T100000Z\r\n"
+        "SUMMARY:First title\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n"
+    ).encode()
+    status, _, _ = _https(
+        "PUT",
+        event,
+        {"Authorization": owner, "Content-Type": "text/calendar"},
+        calendar,
+    )
+    assert status in {201, 204}, status
+    status, stored, _ = _https("GET", event, {"Authorization": owner})
+    assert status == 200
+    assert b"SUMMARY:First title" in stored
+
+    status, _, _ = _https(
+        "PUT",
+        event,
+        {"Authorization": owner, "Content-Type": "text/calendar"},
+        b"this is not a calendar\r\n",
+    )
+    assert status >= 400
+    status, stored, _ = _https("GET", event, {"Authorization": owner})
+    assert status == 200
+    assert b"SUMMARY:First title" in stored
+    assert b"UID:event-1" in stored
+
+    updated = calendar.replace(b"First title", b"Second title")
+    status, _, _ = _https(
+        "PUT",
+        event,
+        {"Authorization": owner, "Content-Type": "text/calendar"},
+        updated,
+    )
+    assert status in {200, 201, 204}, status
+
+    status, renamed = _json_call(
+        "PATCH",
+        f"/api/sources/{source_id}",
+        owner,
+        {"name": "Home renamed"},
+    )
+    assert status == 200, renamed
+    assert renamed["collection_url"] == created["collection_url"]
+    status, props = _propfind(collection, owner)
+    assert status == 207, props[:300]
+    assert b"Home renamed" in props
+    assert b"#1a73e8" in props
+    status, stored, _ = _https("GET", event, {"Authorization": owner})
+    assert b"SUMMARY:Second title" in stored
+    assert b"UID:event-1" in stored
+
+    status, other = _json_call("POST", "/api/sources", owner, {"name": "Other"})
+    assert status == 201, other
+    status, stored, _ = _https("GET", event, {"Authorization": owner})
+    assert b"SUMMARY:Second title" in stored
+
+    status, disabled = _json_call(
+        "PATCH",
+        f"/api/sources/{source_id}",
+        owner,
+        {"enabled": 0},
+    )
+    assert status == 200, disabled
+    assert disabled["enabled"] == 0
+    status, props = _propfind(collection, owner)
+    assert status == 207, props[:300]
+
+    status, _, _ = _https(
+        "DELETE",
+        event,
+        {"Authorization": owner},
+    )
+    assert status in {200, 204}
+    status, gone, _ = _https("GET", event, {"Authorization": owner})
+    assert status != 200
+    assert b"Second title" not in gone
+
+    status, refused = _json_call("DELETE", f"/api/sources/{source_id}", owner, {})
+    assert status == 422, refused
+    status, still = _json_call("GET", f"/api/sources/{source_id}", owner)
+    assert status == 200
+    assert still["name"] == "Home renamed"
+
+    status, removed = _json_call(
+        "DELETE",
+        f"/api/sources/{source_id}?confirm=true",
+        owner,
+        {},
+    )
+    assert status == 200, removed
+    status, missing = _json_call("GET", f"/api/sources/{source_id}", owner)
+    assert status == 404
+    assert missing["error"] == "not_found"
+    status, props = _propfind(collection, owner)
+    assert status != 207

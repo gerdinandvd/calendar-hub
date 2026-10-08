@@ -1,0 +1,101 @@
+body {
+  margin: 0;
+  color: #1f1f1f;
+  background: #fff;
+  font-family: "Segoe UI", sans-serif;
+  line-height: 1.5;
+}
+
+header, main {
+  max-width: 44rem;
+  margin: 0 auto;
+  padding: 1rem 1.25rem;
+}
+
+header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 1rem;
+  border-bottom: 1px solid #ddd;
+}
+
+nav {
+  display: flex;
+  gap: 1rem;
+}
+
+.brand {
+  margin: 0;
+  font-weight: 600;
+}
+
+label, button, input {
+  font: inherit;
+}
+
+label {
+  display: block;
+  margin-top: 0.75rem;
+}
+
+input {
+  display: block;
+  width: 100%;
+  max-width: 24rem;
+  padding: 0.35rem 0.5rem;
+}
+
+button, a {
+  color: #0b3d91;
+}
+
+button {
+  margin-top: 0.75rem;
+  padding: 0.35rem 0.7rem;
+  background: #fff;
+  border: 1px solid #0b3d91;
+  border-radius: 0.25rem;
+}
+
+a:focus-visible, button:focus-visible, input:focus-visible {
+  outline: 2px solid #1a73e8;
+  outline-offset: 2px;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+th, td {
+  text-align: left;
+  padding: 0.4rem 0.5rem 0.4rem 0;
+  vertical-align: top;
+}
+
+.swatch {
+  display: inline-block;
+  width: 1rem;
+  height: 1rem;
+  border: 1px solid #ccc;
+  vertical-align: text-bottom;
+}
+
+#error, #form-error, .field-error {
+  color: #8a1f11;
+}
+
+dialog {
+  border: 1px solid #ccc;
+  max-width: 28rem;
+  padding: 1rem;
+}
+
+dialog::backdrop {
+  background: rgba(0, 0, 0, 0.35);
+}
+
+form {
+  margin: 0;
+}

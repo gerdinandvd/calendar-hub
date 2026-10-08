@@ -1,0 +1,57 @@
+<div id="sources-panel">
+  <h1>Sources</h1>
+  {% if error %}
+  <div id="form-error" tabindex="-1" role="alert">{{ error }}</div>
+  {% endif %}
+  {% if not sources %}
+  <p>There is no source yet.</p>
+  {% endif %}
+  <p><a href="/sources/new">Add a source</a></p>
+  {% if sources %}
+  <table>
+    <thead>
+      <tr>
+        <th>Name</th>
+        <th>Kind</th>
+        <th>Status</th>
+        <th>Enabled</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for source in sources %}
+      <tr>
+        <td>{{ source.name }}</td>
+        <td>{{ source.kind_label }}</td>
+        <td>{{ source.status_label }}</td>
+        <td>
+          <span>{{ "On" if source.enabled else "Off" }}</span>
+          <form method="post" action="/sources/{{ source.id }}/enabled" hx-post="/sources/{{ source.id }}/enabled" hx-target="#sources-panel" hx-swap="outerHTML">
+            {% if source.enabled %}
+            <input type="hidden" name="enabled" value="0">
+            <button type="submit">Turn off</button>
+            {% else %}
+            <input type="hidden" name="enabled" value="1">
+            <button type="submit">Turn on</button>
+            {% endif %}
+          </form>
+        </td>
+        <td><a href="/sources/{{ source.id }}">Edit</a></td>
+        <td>
+          <button type="button" onclick="document.getElementById('delete-{{ source.id }}').showModal()">Delete</button>
+          <dialog id="delete-{{ source.id }}" aria-labelledby="delete-title-{{ source.id }}">
+            <h2 id="delete-title-{{ source.id }}">Delete source</h2>
+            <p>Deleting this source also deletes its calendar.</p>
+            <form method="post" action="/sources/{{ source.id }}/delete" hx-post="/sources/{{ source.id }}/delete" hx-target="#sources-panel" hx-swap="outerHTML">
+              <input type="hidden" name="confirm" value="true">
+              <button type="button" onclick="this.closest('dialog').close()">Cancel</button>
+              <button type="submit">Delete</button>
+            </form>
+          </dialog>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+</div>

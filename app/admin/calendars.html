@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% block main %}
+<h1>Calendars</h1>
+{% if not calendars %}
+<p>There is no source yet.</p>
+{% else %}
+<ul>
+  {% for item in calendars %}
+  <li>
+    <span>{{ item.name }}</span>
+    <span class="swatch" style="background: {{ item.color }}"></span>
+    <span>{{ item.color_name }}</span>
+    <span>{{ item.kind_label }}</span>
+    <a href="{{ item.collection_url }}">{{ item.collection_url }}</a>
+  </li>
+  {% endfor %}
+</ul>
+{% endif %}
+{% endblock %}

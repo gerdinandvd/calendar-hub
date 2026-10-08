@@ -3,6 +3,8 @@ services:
     build: .
     env_file:
       - .env
+    environment:
+      HUB_RADICALE_URL: http://radicale:5232
     volumes:
       - hub-data:/data
     networks:

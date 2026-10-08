@@ -28,10 +28,10 @@ def test_health_starts_and_stops(tmp_path: Path, monkeypatch) -> None:
                 "WHERE type = 'table' AND name NOT LIKE 'sqlite_%'"
             ).all()
         assert str(mode).lower() == "wal"
-        assert tables == []
+        assert [row[0] for row in tables] == ["sources"]
     finally:
         engine.dispose()
-    assert Base.metadata.tables == {}
+    assert set(Base.metadata.tables) == {"sources"}
 
 
 def _route_paths(routes) -> set[str]:
@@ -46,8 +46,14 @@ def _route_paths(routes) -> set[str]:
     return paths
 
 
-def test_only_health_is_mounted() -> None:
+def test_mounted_routes() -> None:
     paths = _route_paths(create_app().routes)
     assert "/api/health" in paths
-    assert "/api/sources" not in paths
+    assert "/api/sources" in paths
+    assert "/api/sources/{source_id}" in paths
+    assert "/api/calendars" in paths
+    assert "/api/caldav-info" in paths
     assert "/api/webhooks/{source_id}" not in paths
+    assert "/api/sources/{source_id}/sync" not in paths
+    assert "/api/oauth/google/start" not in paths
+    assert "/api/oauth/google/callback" not in paths

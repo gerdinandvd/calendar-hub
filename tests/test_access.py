@@ -15,12 +15,12 @@ def _client(tmp_path: Path, monkeypatch) -> TestClient:
 def test_json_mutation_without_content_type_does_not_run(tmp_path: Path, monkeypatch) -> None:
     hit = {"value": False}
     with _client(tmp_path, monkeypatch) as client:
-        @client.app.post("/api/sources")
+        @client.app.post("/api/guard-probe")
         def create_source() -> dict[str, bool]:
             hit["value"] = True
             return {"ok": True}
 
-        rejected = client.post("/api/sources", content=b"name=x")
+        rejected = client.post("/api/guard-probe", content=b"name=x")
         assert rejected.status_code == 415
         assert rejected.json() == {
             "error": "unsupported_media_type",
@@ -31,7 +31,7 @@ def test_json_mutation_without_content_type_does_not_run(tmp_path: Path, monkeyp
         assert "access-control-allow-origin" not in rejected.headers
 
         accepted = client.post(
-            "/api/sources",
+            "/api/guard-probe",
             content=b"{}",
             headers={"Content-Type": "application/json; charset=utf-8"},
         )
@@ -93,7 +93,7 @@ def test_unexpected_error_hides_cause_and_traceback(tmp_path: Path, monkeypatch,
 
 def test_api_not_found_is_json_without_cors(tmp_path: Path, monkeypatch) -> None:
     with _client(tmp_path, monkeypatch) as client:
-        response = client.get("/api/sources")
+        response = client.get("/api/missing")
     assert response.status_code == 404
     assert response.json()["error"] == "not_found"
     assert "Traceback" not in response.text
