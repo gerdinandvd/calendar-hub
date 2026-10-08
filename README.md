@@ -1,8 +1,8 @@
 # Calendar Hub
 
-Persoonlijke hub die kalenderbronnen op één plek zet. De stack start vijf diensten. Caddy beëindigt TLS en vraagt basic auth voor de hub. Sync, bronbeheer, de Admin UI en backups zitten er nog niet in.
+Personal hub that puts calendar sources in one place. The stack starts five services. Caddy terminates TLS and asks for basic auth in front of the hub. Sync, source management, the Admin UI, and backups are not included yet.
 
-## Tests zonder Docker
+## Tests without Docker
 
 ```text
 python -m venv .venv
@@ -10,11 +10,11 @@ python -m venv .venv
 .venv\Scripts\pytest -m "not integration"
 ```
 
-Op Linux of macOS wijst de venv naar `.venv/bin/python` in plaats van `.venv\Scripts\python`.
+On Linux or macOS the venv points at `.venv/bin/python` instead of `.venv\Scripts\python`.
 
 ## Stack
 
-Kopieer het omgevingsbestand, zet daarin `HUB_USER`, `HUB_PASSWORD`, `HUB_INTERNAL_USER` en `HUB_INTERNAL_PASSWORD`, en start de stack:
+Copy the environment file, set `HUB_USER`, `HUB_PASSWORD`, `HUB_INTERNAL_USER`, and `HUB_INTERNAL_PASSWORD` in it, and start the stack:
 
 ```text
 copy .env.example .env
@@ -22,24 +22,24 @@ docker compose up -d --build
 docker compose ps
 ```
 
-Vijf diensten horen te draaien: `hub`, `radicale`, `caddy`, `litestream` en `backup`. Alleen Caddy publiceert een hostpoort, `8443` naar HTTPS. `https://localhost:8443/` antwoordt 401 zonder wachtwoord. Met `HUB_USER` is de hub bereikbaar; een Admin UI is er nog niet.
+Five services should be running: `hub`, `radicale`, `caddy`, `litestream`, and `backup`. Only Caddy publishes a host port, `8443` for HTTPS. `https://localhost:8443/` returns 401 without a password. With `HUB_USER` the hub is reachable; there is no Admin UI yet.
 
-`/api/webhooks/` en `/api/oauth/google/callback` vragen geen basic auth. `/radicale/` vraagt het wachtwoord van `HUB_USER` aan Radicale. Het interne account schrijft later vanaf het Docker-netwerk en werkt niet via Caddy. Hub en Radicale publiceren zelf geen poort. De hub koppelt het Radicale-volume niet.
+`/api/webhooks/` and `/api/oauth/google/callback` do not ask for basic auth. `/radicale/` asks Radicale for the `HUB_USER` password. The internal account writes later from the Docker network and does not work through Caddy. Hub and Radicale do not publish a port themselves. The hub does not mount the Radicale volume.
 
-Litestream en de backup-dienst starten hun programma en blijven daarna draaien. Ze repliceren niet en maken geen snapshot.
+Litestream and the backup service start their program and then keep running. They do not replicate and they do not take a snapshot.
 
-Stoppen:
+Stop:
 
 ```text
 docker compose down
 ```
 
-## Koude start als test
+## Cold start as a test
 
-De integratietest start de stack, controleert TLS, basic auth en CalDAV, en stopt ze weer inclusief volumes. Docker moet daarvoor draaien.
+The integration test starts the stack, checks TLS, basic auth, and CalDAV, and stops it again including volumes. Docker has to be running for that.
 
 ```text
 .venv\Scripts\pytest -m integration
 ```
 
-`pytest` zonder marker draait de gewone tests en deze koude start samen.
+`pytest` without a marker runs the ordinary tests and this cold start together.

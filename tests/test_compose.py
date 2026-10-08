@@ -1,4 +1,4 @@
-"""Koude start en de toegangsgrens van fase 1."""
+"""Cold start and the phase 1 access boundary."""
 
 import base64
 import http.client
@@ -174,7 +174,7 @@ def test_public_access_requires_owner_and_blocks_internal_account(stack: dict[st
     )
     assert status == 401
 
-    marker = "fase1-niet-geschreven"
+    marker = "phase1-not-written"
     status, _, _ = _https(
         "PUT",
         f"/radicale/{quote(stack['HUB_USER'])}/{marker}.ics",
@@ -190,7 +190,7 @@ def test_public_access_requires_owner_and_blocks_internal_account(stack: dict[st
     assert status != 200
     assert marker.encode() not in read_back
 
-    status, _, _ = _https("GET", "/api/webhooks/voorbeeld")
+    status, _, _ = _https("GET", "/api/webhooks/example")
     assert status != 401
     status, _, _ = _https("GET", "/api/oauth/google/callback")
     assert status != 401

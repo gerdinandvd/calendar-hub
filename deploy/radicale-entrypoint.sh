@@ -1,6 +1,6 @@
 #!/bin/sh
-# Zet beide accounts in het userbestand en start daarna de image-entrypoint.
-# Die entrypoint draait Radicale als de gebruiker radicale.
+# Writes both accounts into the user file, then starts the image entrypoint.
+# That entrypoint runs Radicale as the radicale user.
 
 set -eu
 

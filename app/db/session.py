@@ -1,4 +1,4 @@
-"""SQLite-engine in WAL-modus, zonder schema."""
+"""SQLite engine in WAL mode, without a schema."""
 
 import os
 from pathlib import Path

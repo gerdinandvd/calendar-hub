@@ -1,1 +1,1 @@
-"""Inkomende webhooks. Nog geen gedrag."""
+"""Incoming webhooks. No behavior yet."""

@@ -1,1 +1,1 @@
-"""Radicale-client. Nog geen gedrag."""
+"""Radicale client. No behavior yet."""

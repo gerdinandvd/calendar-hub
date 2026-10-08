@@ -1,4 +1,4 @@
-"""Schrijft het Radicale-userbestand bij containerstart. Geen plaintext in de output."""
+"""Writes the Radicale user file at container start. No plaintext in the output."""
 
 import os
 import sys
@@ -10,9 +10,9 @@ import bcrypt
 def require(name: str) -> str:
     value = os.environ.get(name, "")
     if not value:
-        sys.exit(f"{name} is verplicht")
+        sys.exit(f"{name} is required")
     if ":" in value or "\n" in value or "\r" in value:
-        sys.exit(f"{name} bevat een teken dat niet in het userbestand kan")
+        sys.exit(f"{name} contains a character that cannot appear in the user file")
     return value
 
 
@@ -27,7 +27,7 @@ def main() -> None:
     internal = require("HUB_INTERNAL_USER")
     internal_password = require("HUB_INTERNAL_PASSWORD")
     if owner == internal:
-        sys.exit("HUB_INTERNAL_USER moet verschillen van HUB_USER")
+        sys.exit("HUB_INTERNAL_USER must differ from HUB_USER")
 
     path = Path("/data/users")
     path.parent.mkdir(parents=True, exist_ok=True)

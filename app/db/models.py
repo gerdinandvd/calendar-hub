@@ -1,4 +1,4 @@
-"""Declarative basis voor de control plane. Er zijn nog geen tabellen."""
+"""Declarative base for the control plane. There are no tables yet."""
 
 from sqlalchemy.orm import DeclarativeBase
 

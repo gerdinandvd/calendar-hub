@@ -1,1 +1,1 @@
-"""Google OAuth. Nog geen gedrag."""
+"""Google OAuth. No behavior yet."""

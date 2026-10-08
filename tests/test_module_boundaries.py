@@ -1,4 +1,4 @@
-"""Bewaakt de modulegrenzen uit het ontwerp."""
+"""Guards the module boundaries from the design."""
 
 import ast
 from pathlib import Path

@@ -1,1 +1,1 @@
-"""HTML-pagina's. Nog geen gedrag."""
+"""HTML pages. No behavior yet."""

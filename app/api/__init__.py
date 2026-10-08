@@ -1,1 +1,1 @@
-"""HTTP-routes van de hub."""
+"""HTTP routes of the hub."""

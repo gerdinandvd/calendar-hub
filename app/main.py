@@ -1,4 +1,4 @@
-"""FastAPI-proces. Opent de database bij start en sluit die bij stop."""
+"""FastAPI process. Opens the database on startup and closes it on shutdown."""
 
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager

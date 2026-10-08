@@ -1,1 +1,1 @@
-"""Google-import. Nog geen gedrag."""
+"""Google import. No behavior yet."""

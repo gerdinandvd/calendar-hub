@@ -1,4 +1,4 @@
-"""Mutatie-eisen en foutantwoorden. Geen stacktrace naar de client."""
+"""Mutation requirements and error responses. No stack trace to the client."""
 
 import logging
 from collections.abc import Mapping
@@ -13,12 +13,12 @@ from starlette.types import ASGIApp, Receive, Scope, Send
 UNSAFE_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
 
 _STATUS = {
-    400: ("bad_request", "Het verzoek is ongeldig."),
-    404: ("not_found", "Niet gevonden."),
-    405: ("method_not_allowed", "Deze methode is niet toegestaan."),
-    415: ("unsupported_media_type", "Content-Type moet application/json zijn."),
-    422: ("invalid_request", "De invoer is ongeldig."),
-    500: ("internal_error", "Er ging iets mis."),
+    400: ("bad_request", "The request is invalid."),
+    404: ("not_found", "Not found."),
+    405: ("method_not_allowed", "This method is not allowed."),
+    415: ("unsupported_media_type", "Content-Type must be application/json."),
+    422: ("invalid_request", "The input is invalid."),
+    500: ("internal_error", "Something went wrong."),
 }
 
 
@@ -29,7 +29,7 @@ def json_error(status: int, error: str, detail: str) -> JSONResponse:
 def _status_body(status: int) -> tuple[str, str]:
     if status in _STATUS:
         return _STATUS[status]
-    return ("http_error", "Het verzoek is mislukt.")
+    return ("http_error", "The request failed.")
 
 
 def _is_api(path: str) -> bool:
@@ -104,7 +104,7 @@ def _reject_mutation(path: str, headers: Mapping[str, str]) -> Response | None:
 
 
 def _hx_detail() -> str:
-    return "Deze actie vraagt het verzoekhoofd HX-Request."
+    return "This action requires the HX-Request header."
 
 
 def install_access(app: FastAPI) -> None:

@@ -1,1 +1,1 @@
-"""Webhook-import. Nog geen gedrag."""
+"""Webhook import. No behavior yet."""

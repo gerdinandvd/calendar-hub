@@ -1,4 +1,4 @@
-"""Basisstatus van het proces."""
+"""Basic status of the process."""
 
 from fastapi import APIRouter
 

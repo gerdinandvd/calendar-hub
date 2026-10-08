@@ -1,4 +1,4 @@
-"""Logregels voor mutaties. Actor en source_id zijn verplicht; geheimen gaan eruit."""
+"""Log lines for mutations. Actor and source_id are required; secrets are stripped."""
 
 import logging
 import re
@@ -20,10 +20,10 @@ _configured = False
 
 
 def redact(text: str) -> str:
-    cleaned = _AUTHORIZATION.sub("[geredigeerd]", text)
-    cleaned = _ASSIGNED.sub("[geredigeerd]", cleaned)
-    cleaned = _BEARER.sub("[geredigeerd]", cleaned)
-    cleaned = _BASIC.sub("[geredigeerd]", cleaned)
+    cleaned = _AUTHORIZATION.sub("[redacted]", text)
+    cleaned = _ASSIGNED.sub("[redacted]", cleaned)
+    cleaned = _BEARER.sub("[redacted]", cleaned)
+    cleaned = _BASIC.sub("[redacted]", cleaned)
     return cleaned
 
 
@@ -54,9 +54,9 @@ def configure_logging() -> None:
 
 def log_mutation(*, actor: str, source_id: str, message: str) -> None:
     if actor not in ACTORS:
-        raise ValueError("actor moet owner, scheduler of webhook zijn")
+        raise ValueError("actor must be owner, scheduler, or webhook")
     if not source_id.strip():
-        raise ValueError("source_id is verplicht")
+        raise ValueError("source_id is required")
     configure_logging()
     logging.getLogger("app").info(
         "actor=%s source_id=%s %s",

@@ -1,1 +1,1 @@
-"""CalDAV-verbindingsgegevens. Nog geen gedrag."""
+"""CalDAV connection details. No behavior yet."""

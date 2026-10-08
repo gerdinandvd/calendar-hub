@@ -1,4 +1,4 @@
-"""Gedeelde fixtures voor de testopstelling."""
+"""Shared fixtures for the test setup."""
 
 import threading
 from collections.abc import Iterator

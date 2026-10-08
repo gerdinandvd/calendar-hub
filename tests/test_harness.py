@@ -1,4 +1,4 @@
-"""Nep-bron en tijdelijke database, nog zonder importgedrag."""
+"""Fake source and temporary database, still without import behavior."""
 
 from urllib.request import urlopen
 

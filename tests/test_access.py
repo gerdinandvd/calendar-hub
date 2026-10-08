@@ -1,4 +1,4 @@
-"""Mutatie-eisen en foutantwoorden, zonder Docker."""
+"""Mutation requirements and error responses, without Docker."""
 
 from pathlib import Path
 
@@ -24,7 +24,7 @@ def test_json_mutation_without_content_type_does_not_run(tmp_path: Path, monkeyp
         assert rejected.status_code == 415
         assert rejected.json() == {
             "error": "unsupported_media_type",
-            "detail": "Content-Type moet application/json zijn.",
+            "detail": "Content-Type must be application/json.",
         }
         assert "Traceback" not in rejected.text
         assert hit["value"] is False
@@ -42,18 +42,18 @@ def test_json_mutation_without_content_type_does_not_run(tmp_path: Path, monkeyp
 def test_html_mutation_without_hx_request_does_not_run(tmp_path: Path, monkeypatch) -> None:
     hit = {"value": False}
     with _client(tmp_path, monkeypatch) as client:
-        @client.app.post("/bron")
+        @client.app.post("/source")
         def update_source() -> dict[str, bool]:
             hit["value"] = True
             return {"ok": True}
 
-        rejected = client.post("/bron", content=b"name=x")
+        rejected = client.post("/source", content=b"name=x")
         assert rejected.status_code == 400
         assert "HX-Request" in rejected.text
         assert "Traceback" not in rejected.text
         assert hit["value"] is False
 
-        accepted = client.post("/bron", headers={"HX-Request": "true"})
+        accepted = client.post("/source", headers={"HX-Request": "true"})
         assert accepted.status_code == 200
         assert hit["value"] is True
 
@@ -61,12 +61,12 @@ def test_html_mutation_without_hx_request_does_not_run(tmp_path: Path, monkeypat
 def test_webhook_is_exempt_from_json_requirement(tmp_path: Path, monkeypatch) -> None:
     hit = {"value": False}
     with _client(tmp_path, monkeypatch) as client:
-        @client.app.post("/api/webhooks/bron-1")
+        @client.app.post("/api/webhooks/source-1")
         def receive() -> dict[str, bool]:
             hit["value"] = True
             return {"ok": True}
 
-        response = client.post("/api/webhooks/bron-1", content=b"raw")
+        response = client.post("/api/webhooks/source-1", content=b"raw")
         assert response.status_code == 200
         assert hit["value"] is True
 
@@ -76,19 +76,19 @@ def test_unexpected_error_hides_cause_and_traceback(tmp_path: Path, monkeypatch,
     with _client(tmp_path, monkeypatch) as client:
         @client.app.get("/api/boom")
         def boom() -> None:
-            raise RuntimeError(f"token={secret} summary=GeheimeTitel")
+            raise RuntimeError(f"token={secret} summary=SecretTitle")
 
         with caplog.at_level("ERROR", logger="app"):
             response = client.get("/api/boom")
 
     assert response.status_code == 500
-    assert response.json() == {"error": "internal_error", "detail": "Er ging iets mis."}
+    assert response.json() == {"error": "internal_error", "detail": "Something went wrong."}
     assert secret not in response.text
-    assert "GeheimeTitel" not in response.text
+    assert "SecretTitle" not in response.text
     assert "Traceback" not in response.text
     assert "RuntimeError" not in response.text
     assert secret not in caplog.text
-    assert "GeheimeTitel" not in caplog.text
+    assert "SecretTitle" not in caplog.text
 
 
 def test_api_not_found_is_json_without_cors(tmp_path: Path, monkeypatch) -> None:

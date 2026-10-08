@@ -1,1 +1,1 @@
-"""CalDAV-schrijfacties naar Radicale. Nog geen gedrag."""
+"""CalDAV writes to Radicale. No behavior yet."""

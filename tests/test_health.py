@@ -1,4 +1,4 @@
-"""Health-endpoint en levenscyclus van de app."""
+"""Health endpoint and application lifecycle."""
 
 from pathlib import Path
 

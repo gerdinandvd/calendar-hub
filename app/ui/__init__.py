@@ -1,1 +1,1 @@
-"""Server-gerenderde pagina's. Nog geen gedrag."""
+"""Server-rendered pages. No behavior yet."""
