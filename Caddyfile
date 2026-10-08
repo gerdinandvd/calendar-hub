@@ -1,3 +1,41 @@
-:80 {
-	respond "calendar-hub skeleton" 200
+{
+	auto_https disable_redirects
+}
+
+https://localhost, https://127.0.0.1 {
+	tls internal
+
+	@internal_account {
+		path /radicale /radicale/*
+		header Authorization "Basic {$HUB_INTERNAL_BASIC}"
+	}
+	handle @internal_account {
+		respond 401
+	}
+
+	handle /radicale {
+		redir * /radicale/ 308
+	}
+
+	handle_path /radicale/* {
+		reverse_proxy radicale:5232 {
+			header_up X-Script-Name /radicale
+		}
+	}
+
+	@open path /api/webhooks /api/webhooks/* /api/oauth/google/callback
+	handle @open {
+		reverse_proxy hub:8000 {
+			header_up -Authorization
+		}
+	}
+
+	handle {
+		basic_auth {
+			{$HUB_USER} {$HUB_PASSWORD_HASH}
+		}
+		reverse_proxy hub:8000 {
+			header_up -Authorization
+		}
+	}
 }

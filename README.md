@@ -1,6 +1,6 @@
 # Calendar Hub
 
-Persoonlijke hub die kalenderbronnen op één plek zet. Deze boom is het skeleton: de app start en stopt, `GET /api/health` geeft de basisstatus, en Docker Compose start vijf diensten. Sync, bronbeheer, authenticatie, de Admin UI en backups zitten er nog niet in.
+Persoonlijke hub die kalenderbronnen op één plek zet. De stack start vijf diensten. Caddy beëindigt TLS en vraagt basic auth voor de hub. Sync, bronbeheer, de Admin UI en backups zitten er nog niet in.
 
 ## Tests zonder Docker
 
@@ -14,7 +14,7 @@ Op Linux of macOS wijst de venv naar `.venv/bin/python` in plaats van `.venv\Scr
 
 ## Stack
 
-Kopieer het omgevingsbestand en start de stack:
+Kopieer het omgevingsbestand, zet daarin `HUB_USER`, `HUB_PASSWORD`, `HUB_INTERNAL_USER` en `HUB_INTERNAL_PASSWORD`, en start de stack:
 
 ```text
 copy .env.example .env
@@ -22,7 +22,9 @@ docker compose up -d --build
 docker compose ps
 ```
 
-Vijf diensten horen te draaien: `hub`, `radicale`, `caddy`, `litestream` en `backup`. Alleen Caddy publiceert een hostpoort. `http://127.0.0.1:8080/` antwoordt met een vaste tekst. Hub en Radicale luisteren alleen op het Docker-netwerk. De hub koppelt het Radicale-volume niet.
+Vijf diensten horen te draaien: `hub`, `radicale`, `caddy`, `litestream` en `backup`. Alleen Caddy publiceert een hostpoort, `8443` naar HTTPS. `https://localhost:8443/` antwoordt 401 zonder wachtwoord. Met `HUB_USER` is de hub bereikbaar; een Admin UI is er nog niet.
+
+`/api/webhooks/` en `/api/oauth/google/callback` vragen geen basic auth. `/radicale/` vraagt het wachtwoord van `HUB_USER` aan Radicale. Het interne account schrijft later vanaf het Docker-netwerk en werkt niet via Caddy. Hub en Radicale publiceren zelf geen poort. De hub koppelt het Radicale-volume niet.
 
 Litestream en de backup-dienst starten hun programma en blijven daarna draaien. Ze repliceren niet en maken geen snapshot.
 
@@ -34,7 +36,7 @@ docker compose down
 
 ## Koude start als test
 
-De integratietest start de stack, wacht tot de diensten gezond zijn, en stopt ze weer inclusief volumes. Docker moet daarvoor draaien.
+De integratietest start de stack, controleert TLS, basic auth en CalDAV, en stopt ze weer inclusief volumes. Docker moet daarvoor draaien.
 
 ```text
 .venv\Scripts\pytest -m integration

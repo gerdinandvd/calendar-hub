@@ -23,32 +23,54 @@ services:
 
   radicale:
     image: tomsquest/docker-radicale:3.8.1.1
+    env_file:
+      - .env
+    environment:
+      TAKE_FILE_OWNERSHIP: "true"
     volumes:
       - radicale-data:/data
+      - ./deploy/radicale.config:/config/config:ro
+      - ./deploy/radicale-entrypoint.sh:/usr/local/bin/calendar-hub-radicale.sh:ro
+      - ./deploy/radicale-users.py:/usr/local/bin/calendar-hub-radicale-users.py:ro
+    entrypoint: ["/bin/sh", "/usr/local/bin/calendar-hub-radicale.sh"]
     networks:
       - internal
     healthcheck:
-      test: ["CMD", "curl", "--fail", "http://127.0.0.1:5232"]
+      test:
+        [
+          "CMD-SHELL",
+          "code=$$(curl -s -o /dev/null -w '%{http_code}' -X PROPFIND -H 'Depth: 0' http://127.0.0.1:5232/); test \"$$code\" = 401",
+        ]
       interval: 5s
       timeout: 5s
       retries: 12
-      start_period: 5s
+      start_period: 10s
     restart: unless-stopped
 
   caddy:
     image: caddy:2.11.7
+    env_file:
+      - .env
     ports:
-      - "8080:80"
+      - "8443:443"
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./deploy/caddy-entrypoint.sh:/usr/local/bin/calendar-hub-caddy.sh:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    entrypoint: ["/bin/sh", "/usr/local/bin/calendar-hub-caddy.sh"]
     networks:
       - internal
     healthcheck:
-      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1/"]
+      test:
+        [
+          "CMD-SHELL",
+          "wget -S -O /dev/null --no-check-certificate https://127.0.0.1/ 2>&1 | grep -q 401",
+        ]
       interval: 5s
       timeout: 5s
       retries: 12
-      start_period: 5s
+      start_period: 10s
     restart: unless-stopped
 
   litestream:
@@ -89,3 +111,5 @@ networks:
 volumes:
   hub-data:
   radicale-data:
+  caddy-data:
+  caddy-config:
