@@ -73,6 +73,15 @@ class RadicaleClient:
     def delete_event(self, path: str) -> None:
         self._request("DELETE", path, None, ok={200, 202, 204, 404})
 
+    def get_event(self, path: str) -> bytes | None:
+        status, _headers, payload = self._call("GET", path, None)
+        if status == 404:
+            return None
+        if status != 200:
+            logger.error("radicale_error method=GET status=%s", status)
+            raise RadicaleError("The calendar could not be saved.")
+        return payload
+
     def _lookup_etag(self, path: str) -> str | None:
         status, headers, _payload = self._call("GET", path, None)
         if status == 404:

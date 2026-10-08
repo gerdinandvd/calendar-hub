@@ -1,5 +1,8 @@
 <div id="sync-panel" hx-get="/sync/panel" hx-trigger="every 10s" hx-swap="outerHTML">
   <h1>Sync</h1>
+  {% if error %}
+  <div id="form-error" tabindex="-1" role="alert">{{ error }}</div>
+  {% endif %}
   {% if not sources %}
   <p>There is no source yet.</p>
   {% else %}
@@ -29,6 +32,13 @@
         <td>{% if source.events_seen != None %}{{ source.events_seen }}{% endif %}</td>
         <td>{% if source.events_upserted != None %}{{ source.events_upserted }}{% endif %}</td>
         <td>{% if source.events_deleted != None %}{{ source.events_deleted }}{% endif %}</td>
+        <td>
+          {% if source.kind == "google" or source.kind == "ics" %}
+          <form method="post" action="/sources/{{ source.id }}/sync?view=sync" hx-post="/sources/{{ source.id }}/sync?view=sync" hx-target="#sync-panel" hx-swap="outerHTML">
+            <button type="submit">Sync now</button>
+          </form>
+          {% endif %}
+        </td>
       </tr>
       {% endfor %}
     </tbody>

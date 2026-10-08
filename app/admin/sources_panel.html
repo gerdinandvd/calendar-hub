@@ -7,6 +7,7 @@
   <p>There is no source yet.</p>
   {% endif %}
   <p><a href="/sources/new">Add a source</a></p>
+  <p><a href="/sources/new?kind=ics">Add an external ICS</a></p>
   <p><a href="/sources/new?kind=webhook">Add a webhook</a></p>
   {% if sources %}
   <table>
@@ -38,6 +39,13 @@
           </form>
         </td>
         <td><a href="/sources/{{ source.id }}">Edit</a></td>
+        <td>
+          {% if source.kind == "google" or source.kind == "ics" %}
+          <form method="post" action="/sources/{{ source.id }}/sync?view=sources" hx-post="/sources/{{ source.id }}/sync?view=sources" hx-target="#sources-panel" hx-swap="outerHTML">
+            <button type="submit">Sync now</button>
+          </form>
+          {% endif %}
+        </td>
         <td>
           <button type="button" onclick="document.getElementById('delete-{{ source.id }}').showModal()">Delete</button>
           <dialog id="delete-{{ source.id }}" aria-labelledby="delete-title-{{ source.id }}">

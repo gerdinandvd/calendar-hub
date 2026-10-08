@@ -17,6 +17,8 @@ from app.db.models import Base
 from app.db.session import make_engine
 from app.log import configure_logging
 from app.radicale.client import RadicaleClient
+from app.sync.runner import arm
+from app.sync.scheduler import Scheduler
 from app.ui.pages import router as pages_router
 
 
@@ -31,8 +33,15 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         Base.metadata.create_all(engine)
         ensure_sync_states(engine)
         app.state.webhook_rates = RateLimiter()
+        arm()
+        scheduler = Scheduler(engine, app.state.radicale)
+        app.state.scheduler = scheduler
+        scheduler.start()
         yield
     finally:
+        scheduler = getattr(app.state, "scheduler", None)
+        if scheduler is not None:
+            await scheduler.shutdown()
         engine.dispose()
 
 

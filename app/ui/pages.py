@@ -9,6 +9,7 @@ from fastapi.templating import Jinja2Templates
 
 from app.api.caldav_info import build_caldav_info
 from app.api.sources import (
+    DEFAULT_POLL_SECONDS,
     SourceFailure,
     create_source,
     delete_source,
@@ -17,7 +18,9 @@ from app.api.sources import (
     list_calendars,
     list_sources,
     list_sync_status,
+    poll_from_form,
     rotate_webhook_secret,
+    start_sync,
     update_source,
 )
 
@@ -55,14 +58,23 @@ def sources_page(request: Request) -> HTMLResponse:
 
 @router.get("/sources/new")
 def new_source_page(request: Request, kind: str = "private") -> HTMLResponse:
-    mode = "webhook" if kind == "webhook" else "create"
+    mode = _create_mode(kind)
     return _form_page(request, mode=mode, draft=_draft("", "Europe/Amsterdam"), errors=_blank_errors())
 
 
 @router.post("/sources")
 async def create_source_page(request: Request, kind: str = "private") -> HTMLResponse:
     form = await _form(request)
-    chosen = "webhook" if kind == "webhook" else "private"
+    chosen = _chosen_kind(kind)
+    mode = _create_mode(kind)
+    ics_values, ics_error = _ics_values(form, create=True) if chosen == "ics" else ({}, None)
+    if isinstance(ics_error, SourceFailure):
+        return _form_fragment(
+            request,
+            mode=mode,
+            draft=_draft(form.get("name", ""), "Europe/Amsterdam", form=form),
+            errors=_errors(ics_error),
+        )
     result = create_source(
         request.app.state.engine,
         request.app.state.radicale,
@@ -71,12 +83,13 @@ async def create_source_page(request: Request, kind: str = "private") -> HTMLRes
         enabled=None,
         kind=chosen,
         reveal_secret=chosen == "webhook",
+        **ics_values,
     )
     if isinstance(result, SourceFailure):
         return _form_fragment(
             request,
-            mode="webhook" if chosen == "webhook" else "create",
-            draft=_draft(form.get("name", ""), "Europe/Amsterdam"),
+            mode=mode,
+            draft=_draft(form.get("name", ""), "Europe/Amsterdam", form=form),
             errors=_errors(result),
         )
     if chosen == "webhook":
@@ -92,9 +105,10 @@ def edit_source_page(source_id: str, request: Request) -> HTMLResponse:
     return _form_page(
         request,
         mode="edit",
-        draft=_draft(found["name"], found["timezone"], found["id"]),
+        draft=_draft(found["name"], found["timezone"], found["id"], source=found),
         errors=_blank_errors(),
         kind_label=found["kind_label"],
+        kind=found["kind"],
         webhook=_webhook_view(found),
     )
 
@@ -102,24 +116,39 @@ def edit_source_page(source_id: str, request: Request) -> HTMLResponse:
 @router.post("/sources/{source_id}")
 async def update_source_page(source_id: str, request: Request) -> HTMLResponse:
     form = await _form(request)
+    found = get_source(request.app.state.engine, source_id)
+    if found is None:
+        raise HTTPException(status_code=404)
+    ics_values: dict = {}
+    if found["kind"] == "ics":
+        ics_values, ics_error = _ics_values(form, create=False)
+        if isinstance(ics_error, SourceFailure):
+            return _form_fragment(
+                request,
+                mode="edit",
+                draft=_draft(form.get("name", ""), form.get("timezone", ""), source_id, form=form, source=found),
+                errors=_errors(ics_error),
+                kind_label=found["kind_label"],
+                kind=found["kind"],
+            )
     result = update_source(
         request.app.state.engine,
         request.app.state.radicale,
         source_id,
         name=form.get("name", ""),
         timezone_name=form.get("timezone", ""),
+        **ics_values,
     )
     if isinstance(result, SourceFailure):
         if result.status == 404:
             raise HTTPException(status_code=404)
-        found = get_source(request.app.state.engine, source_id)
-        label = found["kind_label"] if found is not None else "Private"
         return _form_fragment(
             request,
             mode="edit",
-            draft=_draft(form.get("name", ""), form.get("timezone", ""), source_id),
+            draft=_draft(form.get("name", ""), form.get("timezone", ""), source_id, form=form, source=found),
             errors=_errors(result),
-            kind_label=label,
+            kind_label=found["kind_label"],
+            kind=found["kind"],
         )
     return _redirect("/sources")
 
@@ -169,6 +198,24 @@ def rotate_secret_page(source_id: str, request: Request) -> HTMLResponse:
     return _secret_panel(request, source_id, result.get("webhook_secret", ""))
 
 
+@router.post("/sources/{source_id}/sync")
+def sync_source_page(source_id: str, request: Request) -> HTMLResponse:
+    form_error = ""
+    result = start_sync(request.app.state.engine, request.app.state.radicale, source_id)
+    if isinstance(result, SourceFailure):
+        if result.status == 404:
+            raise HTTPException(status_code=404)
+        form_error = result.detail
+    view = request.query_params.get("view", "")
+    if view == "sync":
+        return templates.TemplateResponse(
+            request,
+            "sync_panel.html",
+            {"sources": list_sync_status(request.app.state.engine), "error": form_error},
+        )
+    return _sources_panel(request, form_error)
+
+
 @router.get("/calendars")
 def calendars_page(request: Request) -> HTMLResponse:
     return _page(
@@ -189,6 +236,7 @@ def sync_page(request: Request) -> HTMLResponse:
         {
             "title": "Sync",
             "sources": list_sync_status(request.app.state.engine),
+            "error": "",
         },
     )
 
@@ -198,7 +246,7 @@ def sync_panel(request: Request) -> HTMLResponse:
     return templates.TemplateResponse(
         request,
         "sync_panel.html",
-        {"sources": list_sync_status(request.app.state.engine)},
+        {"sources": list_sync_status(request.app.state.engine), "error": ""},
     )
 
 
@@ -223,12 +271,13 @@ def _form_page(
     draft: dict,
     errors: dict[str, str],
     kind_label: str = "Private",
+    kind: str = "",
     webhook: dict | None = None,
 ) -> HTMLResponse:
     return _page(
         request,
         "source_page.html",
-        _form_context(mode, draft, errors, kind_label=kind_label, webhook=webhook),
+        _form_context(mode, draft, errors, kind_label=kind_label, kind=kind, webhook=webhook),
     )
 
 
@@ -239,12 +288,13 @@ def _form_fragment(
     draft: dict,
     errors: dict[str, str],
     kind_label: str = "Private",
+    kind: str = "",
 ) -> HTMLResponse:
     name = "webhook_form.html" if mode == "webhook" else "source_form.html"
     return templates.TemplateResponse(
         request,
         name,
-        _form_context(mode, draft, errors, kind_label=kind_label),
+        _form_context(mode, draft, errors, kind_label=kind_label, kind=kind),
     )
 
 
@@ -254,16 +304,24 @@ def _form_context(
     errors: dict[str, str],
     *,
     kind_label: str = "Private",
+    kind: str = "",
     webhook: dict | None = None,
 ) -> dict:
     editing = mode == "edit"
     webhook_mode = mode == "webhook"
+    ics_mode = mode == "ics"
     if webhook_mode:
         title = "Add a webhook"
         heading = "Add a webhook"
         submit_label = "Add a webhook"
         action = "/sources?kind=webhook"
         label = "Webhook"
+    elif ics_mode:
+        title = "Add an external ICS"
+        heading = "Add an external ICS"
+        submit_label = "Add an external ICS"
+        action = "/sources?kind=ics"
+        label = "External ICS"
     elif editing:
         title = "Edit source"
         heading = "Edit source"
@@ -283,6 +341,7 @@ def _form_context(
         "action": action,
         "mode": mode,
         "kind_label": label,
+        "ics": ics_mode or (editing and kind == "ics"),
         "draft": draft,
         "errors": errors,
         "webhook_url": "" if webhook is None else webhook["url"],
@@ -337,12 +396,50 @@ def _sources_panel(request: Request, error: str) -> HTMLResponse:
     )
 
 
-def _draft(name: str, timezone_name: str, source_id: str = "") -> dict:
-    return {"id": source_id, "name": name, "timezone": timezone_name}
+def _draft(
+    name: str,
+    timezone_name: str,
+    source_id: str = "",
+    *,
+    form: dict | None = None,
+    source: dict | None = None,
+) -> dict:
+    posted = form or {}
+    stored = source or {}
+    if form is not None:
+        poll = posted.get("poll_seconds", "")
+        allow = 1 if posted.get("ics_allow_http") == "1" else 0
+        url = posted.get("ics_url", "")
+    elif stored.get("kind") == "ics":
+        poll = stored.get("poll_seconds", DEFAULT_POLL_SECONDS)
+        allow = stored.get("ics_allow_http", 0)
+        url = stored.get("ics_url") or ""
+    else:
+        poll = DEFAULT_POLL_SECONDS
+        allow = 0
+        url = ""
+    header_set = bool(stored.get("ics_authorization_set")) and posted.get("clear_ics_authorization") != "1"
+    return {
+        "id": source_id or stored.get("id", ""),
+        "name": name,
+        "timezone": timezone_name,
+        "ics_url": url,
+        "poll_seconds": poll,
+        "ics_allow_http": allow,
+        "ics_authorization_set": header_set,
+    }
 
 
 def _blank_errors() -> dict[str, str]:
-    return {"top": "", "name": "", "timezone": ""}
+    return {
+        "top": "",
+        "name": "",
+        "timezone": "",
+        "ics_url": "",
+        "poll_seconds": "",
+        "ics_authorization_header": "",
+        "ics_allow_http": "",
+    }
 
 
 def _errors(failure: SourceFailure) -> dict[str, str]:
@@ -350,7 +447,47 @@ def _errors(failure: SourceFailure) -> dict[str, str]:
         "top": failure.detail,
         "name": failure.fields.get("name", ""),
         "timezone": failure.fields.get("timezone", ""),
+        "ics_url": failure.fields.get("ics_url", ""),
+        "poll_seconds": failure.fields.get("poll_seconds", ""),
+        "ics_authorization_header": failure.fields.get("ics_authorization_header", ""),
+        "ics_allow_http": failure.fields.get("ics_allow_http", ""),
     }
+
+
+def _create_mode(kind: str) -> str:
+    if kind == "webhook":
+        return "webhook"
+    if kind == "ics":
+        return "ics"
+    return "create"
+
+
+def _chosen_kind(kind: str) -> str:
+    if kind == "webhook":
+        return "webhook"
+    if kind == "ics":
+        return "ics"
+    return "private"
+
+
+def _ics_values(form: dict[str, str], *, create: bool) -> tuple[dict, SourceFailure | None]:
+    raw_poll = form.get("poll_seconds", "")
+    if create and raw_poll.strip() == "":
+        poll: int | SourceFailure = DEFAULT_POLL_SECONDS
+    else:
+        poll = poll_from_form(raw_poll)
+    if isinstance(poll, SourceFailure):
+        return {}, poll
+    header = form.get("ics_authorization_header", "").strip()
+    values = {
+        "ics_url": form.get("ics_url", ""),
+        "ics_allow_http": 1 if form.get("ics_allow_http") == "1" else 0,
+        "poll_seconds": poll,
+        "ics_authorization_header": header or None,
+    }
+    if not create:
+        values["clear_ics_authorization"] = form.get("clear_ics_authorization") == "1"
+    return values, None
 
 
 def _webhook_view(found: dict) -> dict | None:

@@ -16,6 +16,30 @@
     <p id="timezone-error">{{ errors.timezone }}</p>
     {% endif %}
     {% endif %}
+    {% if ics %}
+    <label for="ics_url">URL</label>
+    <input id="ics_url" name="ics_url" value="{{ draft.ics_url }}" {% if errors.ics_url %}aria-invalid="true" aria-describedby="ics_url-error"{% endif %}>
+    {% if errors.ics_url %}
+    <p id="ics_url-error">{{ errors.ics_url }}</p>
+    {% endif %}
+    <label for="ics_authorization_header">Authorization header</label>
+    <input id="ics_authorization_header" name="ics_authorization_header" type="password" value="" autocomplete="off" {% if errors.ics_authorization_header %}aria-invalid="true" aria-describedby="ics_authorization_header-error"{% endif %}>
+    {% if errors.ics_authorization_header %}
+    <p id="ics_authorization_header-error">{{ errors.ics_authorization_header }}</p>
+    {% endif %}
+    {% if draft.ics_authorization_set %}
+    <p>An authorization header is set.</p>
+    <label for="clear_ics_authorization">Remove the authorization header</label>
+    <input id="clear_ics_authorization" name="clear_ics_authorization" type="checkbox" value="1">
+    {% endif %}
+    <label for="poll_seconds">Poll interval in seconds</label>
+    <input id="poll_seconds" name="poll_seconds" value="{{ draft.poll_seconds }}" {% if errors.poll_seconds %}aria-invalid="true" aria-describedby="poll_seconds-error"{% endif %}>
+    {% if errors.poll_seconds %}
+    <p id="poll_seconds-error">{{ errors.poll_seconds }}</p>
+    {% endif %}
+    <label for="ics_allow_http">Allow http</label>
+    <input id="ics_allow_http" name="ics_allow_http" type="checkbox" value="1" {% if draft.ics_allow_http %}checked{% endif %}>
+    {% endif %}
     <button type="submit">{{ submit_label }}</button>
   </form>
 </div>

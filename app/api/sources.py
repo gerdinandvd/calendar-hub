@@ -5,10 +5,11 @@ import secrets
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from urllib.parse import quote
+from urllib.parse import quote, urlsplit
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from fastapi import APIRouter, Request
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy import delete, func, select
 from sqlalchemy.exc import IntegrityError
@@ -20,12 +21,15 @@ from app.db.models import EventMapping, Source, SourceSecret, SyncState
 from app.log import log_mutation
 from app.radicale.client import RadicaleClient, RadicaleError
 from app.secrets import SecretKeyError, decrypt, encrypt, equal
+from app.sync.runner import SlotBusy, SyncRejected
+from app.sync.runner import start_sync as launch_sync
 
 router = APIRouter()
 
 MAX_SOURCES = 20
 DEFAULT_TIMEZONE = "Europe/Amsterdam"
-CREATABLE_KINDS = frozenset({"private", "webhook"})
+DEFAULT_POLL_SECONDS = 900
+CREATABLE_KINDS = frozenset({"private", "webhook", "ics"})
 STATUS_LABELS = {
     "idle": "not yet started",
     "running": "busy",
@@ -58,6 +62,14 @@ class SourceFailure:
     fields: dict[str, str] = field(default_factory=dict)
 
 
+@dataclass(frozen=True)
+class _IcsReady:
+    url: str
+    allow_http: int
+    poll_seconds: int
+    header: str | None
+
+
 class SourceCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -65,6 +77,10 @@ class SourceCreate(BaseModel):
     timezone: str | None = None
     enabled: int | None = None
     kind: str = "private"
+    ics_url: str | None = None
+    ics_allow_http: int | None = None
+    poll_seconds: int | None = None
+    ics_authorization_header: str | None = None
 
 
 class SourcePatch(BaseModel):
@@ -73,6 +89,11 @@ class SourcePatch(BaseModel):
     name: str | None = None
     timezone: str | None = None
     enabled: int | None = None
+    ics_url: str | None = None
+    ics_allow_http: int | None = None
+    poll_seconds: int | None = None
+    ics_authorization_header: str | None = None
+    clear_ics_authorization: int | None = None
 
 
 def create_source(
@@ -84,13 +105,43 @@ def create_source(
     enabled: int | None,
     kind: str,
     reveal_secret: bool = False,
+    ics_url: str | None = None,
+    ics_allow_http: int | None = None,
+    poll_seconds: int | None = None,
+    ics_authorization_header: str | None = None,
 ) -> dict | SourceFailure:
-    failure = _validate_new(kind, name, timezone_name, enabled)
+    failure = _validate_new(
+        kind,
+        name,
+        timezone_name,
+        enabled,
+        ics_url=ics_url,
+        ics_allow_http=ics_allow_http,
+        poll_seconds=poll_seconds,
+        ics_authorization_header=ics_authorization_header,
+    )
     if failure is not None:
         return failure
     cleaned = name.strip()
     zone = (timezone_name or DEFAULT_TIMEZONE).strip()
     bit = 1 if enabled is None else enabled
+    ready: _IcsReady | None = None
+    header_cipher = None
+    if kind == "ics":
+        ready_or_failure = _prepare_ics(
+            ics_url,
+            ics_allow_http,
+            poll_seconds,
+            ics_authorization_header,
+        )
+        if isinstance(ready_or_failure, SourceFailure):
+            return ready_or_failure
+        ready = ready_or_failure
+        if ready.header:
+            try:
+                header_cipher = encrypt(ready.header)
+            except SecretKeyError as exc:
+                return _failure(500, str(exc))
     plaintext = ""
     ciphertext = None
     if kind == "webhook":
@@ -128,10 +179,10 @@ def create_source(
                 color=color,
                 collection_path=path,
                 enabled=bit,
-                poll_seconds=None,
+                poll_seconds=None if ready is None else ready.poll_seconds,
                 timezone=zone,
-                ics_url=None,
-                ics_allow_http=0,
+                ics_url=None if ready is None else ready.url,
+                ics_allow_http=0 if ready is None else ready.allow_http,
                 google_calendar_id=None,
                 created_at=stamp,
                 updated_at=stamp,
@@ -141,8 +192,10 @@ def create_source(
             session.add(state)
             if ciphertext is not None:
                 session.add(_new_secret(source_id, ciphertext))
+            elif header_cipher is not None:
+                session.add(_ics_secret(source_id, header_cipher))
             session.flush()
-            payload = _public(row, state)
+            payload = _public(row, state, authorization_set=header_cipher is not None)
     except _LimitReached:
         _drop_collection(radicale, path)
         return _failure(422, "You can add at most 20 sources.")
@@ -166,6 +219,11 @@ def update_source(
     name: str | None = None,
     timezone_name: str | None = None,
     enabled: int | None = None,
+    ics_url: str | None = None,
+    ics_allow_http: int | None = None,
+    poll_seconds: int | None = None,
+    ics_authorization_header: str | None = None,
+    clear_ics_authorization: bool = False,
 ) -> dict | SourceFailure:
     failure = _validate_change(name, timezone_name, enabled)
     if failure is not None:
@@ -179,6 +237,37 @@ def update_source(
         current_enabled = row.enabled
         current_path = row.collection_path
         current_color = row.color
+        current_kind = row.kind
+        current_url = row.ics_url
+        current_allow = row.ics_allow_http
+        current_poll = row.poll_seconds
+    ics_change = any(
+        value is not None
+        for value in (ics_url, ics_allow_http, poll_seconds, ics_authorization_header)
+    ) or clear_ics_authorization
+    if ics_change and current_kind != "ics":
+        return _failure(422, "Those fields are only for an external ICS source.")
+    ready: _IcsReady | None = None
+    header_cipher = None
+    header_action = "keep"
+    if current_kind == "ics" and ics_change:
+        ready_or_failure = _prepare_ics(
+            current_url if ics_url is None else ics_url,
+            current_allow if ics_allow_http is None else ics_allow_http,
+            current_poll if poll_seconds is None else poll_seconds,
+            ics_authorization_header,
+        )
+        if isinstance(ready_or_failure, SourceFailure):
+            return ready_or_failure
+        ready = ready_or_failure
+        if clear_ics_authorization and not ready.header:
+            header_action = "clear"
+        elif ready.header:
+            header_action = "replace"
+            try:
+                header_cipher = encrypt(ready.header)
+            except SecretKeyError as exc:
+                return _failure(500, str(exc))
     new_name = current_name if name is None else name.strip()
     new_zone = current_zone if timezone_name is None else timezone_name.strip()
     new_enabled = current_enabled if enabled is None else enabled
@@ -199,8 +288,26 @@ def update_source(
             row.timezone = new_zone
             row.enabled = new_enabled
             row.updated_at = _now()
+            if ready is not None:
+                row.ics_url = ready.url
+                row.ics_allow_http = ready.allow_http
+                row.poll_seconds = ready.poll_seconds
+            drop_cursor = new_zone != current_zone or (
+                ready is not None and ready.url != current_url
+            )
+            if header_action != "keep":
+                _store_header(session, source_id, None if header_action == "clear" else header_cipher)
+                drop_cursor = True
+            if drop_cursor and row.kind == "ics":
+                state = session.get(SyncState, source_id)
+                if state is not None:
+                    state.cursor = None
             session.flush()
-            payload = _public(row, session.get(SyncState, source_id))
+            payload = _public(
+                row,
+                session.get(SyncState, source_id),
+                authorization_set=_header_set(session, source_id),
+            )
     except _Missing:
         if new_name != current_name:
             _restore_name(radicale, current_path, current_name, current_color)
@@ -251,14 +358,37 @@ def get_source(engine: Engine, source_id: str) -> dict | None:
         row = session.get(Source, source_id)
         if row is None:
             return None
-        return _public(row, session.get(SyncState, source_id))
+        return _public(
+            row,
+            session.get(SyncState, source_id),
+            authorization_set=_header_set(session, source_id),
+        )
 
 
 def list_sources(engine: Engine) -> list[dict]:
     with Session(engine) as session:
         rows = session.scalars(select(Source).order_by(Source.created_at, Source.id)).all()
         states = _states(session)
-        return [_public(row, states.get(row.id)) for row in rows]
+        return [
+            _public(row, states.get(row.id), authorization_set=_header_set(session, row.id))
+            for row in rows
+        ]
+
+
+def start_sync(
+    engine: Engine,
+    radicale: RadicaleClient,
+    source_id: str,
+    *,
+    actor: str = "owner",
+) -> dict | SourceFailure:
+    try:
+        launch_sync(engine, radicale, source_id, actor=actor)
+    except SlotBusy:
+        return _failure(409, "A sync is already running.", error="sync_running")
+    except SyncRejected as exc:
+        return _failure(exc.status, exc.detail, error=exc.error)
+    return {"status": "running"}
 
 
 def list_sync_status(engine: Engine) -> list[dict]:
@@ -361,6 +491,10 @@ def post_source(body: SourceCreate, request: Request) -> dict:
         timezone_name=body.timezone,
         enabled=body.enabled,
         kind=body.kind,
+        ics_url=body.ics_url,
+        ics_allow_http=body.ics_allow_http,
+        poll_seconds=body.poll_seconds,
+        ics_authorization_header=body.ics_authorization_header,
     )
     return _json(result)
 
@@ -382,8 +516,21 @@ def patch_source(source_id: str, body: SourcePatch, request: Request) -> dict:
         name=body.name,
         timezone_name=body.timezone,
         enabled=body.enabled,
+        ics_url=body.ics_url,
+        ics_allow_http=body.ics_allow_http,
+        poll_seconds=body.poll_seconds,
+        ics_authorization_header=body.ics_authorization_header,
+        clear_ics_authorization=body.clear_ics_authorization == 1,
     )
     return _json(result)
+
+
+@router.post("/api/sources/{source_id}/sync", response_model=None)
+def post_sync(source_id: str, request: Request) -> dict | JSONResponse:
+    result = start_sync(request.app.state.engine, request.app.state.radicale, source_id)
+    if isinstance(result, SourceFailure):
+        return json_error(result.status, result.error, result.detail)
+    return JSONResponse(result, status_code=202)
 
 
 @router.post("/api/sources/{source_id}/rotate-secret")
@@ -451,14 +598,31 @@ def _field(name: str, message: str) -> SourceFailure:
     return _failure(422, message, {name: message})
 
 
+def poll_from_form(raw: str) -> int | SourceFailure:
+    text = raw.strip()
+    if not text.isdigit():
+        return _field("poll_seconds", "Enter a poll interval in seconds.")
+    return _poll_value(int(text))
+
+
 def _validate_new(
     kind: str,
     name: str,
     timezone_name: str | None,
     enabled: int | None,
+    *,
+    ics_url: str | None = None,
+    ics_allow_http: int | None = None,
+    poll_seconds: int | None = None,
+    ics_authorization_header: str | None = None,
 ) -> SourceFailure | None:
     if kind not in CREATABLE_KINDS:
-        return _failure(422, "Only a private or webhook source can be created.")
+        return _failure(422, "Only a private, webhook, or external ICS source can be created.")
+    if kind != "ics" and any(
+        value is not None
+        for value in (ics_url, ics_allow_http, poll_seconds, ics_authorization_header)
+    ):
+        return _failure(422, "Those fields are only for an external ICS source.")
     fields: dict[str, str] = {}
     if not name.strip():
         fields["name"] = "Enter a name."
@@ -555,6 +719,97 @@ def _new_secret(source_id: str, ciphertext: str) -> SourceSecret:
     )
 
 
+def _ics_secret(source_id: str, ciphertext: str) -> SourceSecret:
+    return SourceSecret(
+        source_id=source_id,
+        webhook_secret=None,
+        oauth_refresh_token=None,
+        oauth_access_token=None,
+        oauth_expiry=None,
+        ics_authorization_header=ciphertext,
+    )
+
+
+def _prepare_ics(
+    url: str | None,
+    allow_http: int | None,
+    poll_seconds: int | None,
+    header: str | None,
+) -> _IcsReady | SourceFailure:
+    fields: dict[str, str] = {}
+    allow = 0 if allow_http is None else allow_http
+    if type(allow) is bool or allow not in (0, 1):
+        fields["ics_allow_http"] = "Allow http must be 0 or 1."
+        allow = 0
+    text = "" if url is None else url.strip()
+    url_error = _url_error(text, allow == 1)
+    if url_error:
+        fields["ics_url"] = url_error
+    poll: int | SourceFailure
+    if poll_seconds is None:
+        poll = DEFAULT_POLL_SECONDS
+    else:
+        poll = _poll_value(poll_seconds)
+        if isinstance(poll, SourceFailure):
+            fields["poll_seconds"] = poll.detail
+            poll = DEFAULT_POLL_SECONDS
+    cleaned_header, header_error = _clean_header(header)
+    if header_error:
+        fields["ics_authorization_header"] = header_error
+    if fields:
+        return _failure(422, " ".join(fields.values()), fields)
+    return _IcsReady(
+        url=text,
+        allow_http=allow,
+        poll_seconds=poll if isinstance(poll, int) else DEFAULT_POLL_SECONDS,
+        header=cleaned_header,
+    )
+
+
+def _poll_value(value: int) -> int | SourceFailure:
+    if type(value) is bool or type(value) is not int or not 1 <= value <= 2147483647:
+        return _field("poll_seconds", "Enter a poll interval in seconds.")
+    return value
+
+
+def _clean_header(value: str | None) -> tuple[str | None, str | None]:
+    if value is None:
+        return None, None
+    text = value.strip()
+    if text == "":
+        return None, None
+    if any(char in text for char in "\r\n") or len(text) > 4096:
+        return None, "Enter an authorization header."
+    return text, None
+
+
+def _url_error(url: str, allow_http: bool) -> str | None:
+    if not url or any(char in url for char in "\r\n\t "):
+        return "Enter an https URL."
+    parsed = urlsplit(url)
+    scheme = parsed.scheme.lower()
+    if not parsed.hostname or parsed.username or parsed.password:
+        return "Enter an https URL."
+    if scheme == "https" or (scheme == "http" and allow_http):
+        return None
+    return "Enter an https URL."
+
+
+def _store_header(session: Session, source_id: str, ciphertext: str | None) -> None:
+    secret = session.get(SourceSecret, source_id)
+    if secret is None:
+        if ciphertext is None:
+            return
+        session.add(_ics_secret(source_id, ciphertext))
+        return
+    secret.ics_authorization_header = ciphertext
+
+
+def _header_set(session: Session, source_id: str) -> bool:
+    secret = session.get(SourceSecret, source_id)
+    return bool(secret is not None and secret.ics_authorization_header)
+
+
 def _status_code(row: Source, state: SyncState | None) -> str:
     if row.kind == "private":
         return "na"
@@ -563,10 +818,10 @@ def _status_code(row: Source, state: SyncState | None) -> str:
     return state.status
 
 
-def _public(row: Source, state: SyncState | None) -> dict:
+def _public(row: Source, state: SyncState | None, *, authorization_set: bool = False) -> dict:
     info = KINDS.get(row.kind, KindInfo(row.color, row.color, row.kind))
     status = _status_code(row, state)
-    return {
+    payload = {
         "id": row.id,
         "kind": row.kind,
         "kind_label": info.label,
@@ -582,6 +837,12 @@ def _public(row: Source, state: SyncState | None) -> dict:
         "created_at": row.created_at,
         "updated_at": row.updated_at,
     }
+    if row.kind == "ics":
+        payload["ics_url"] = row.ics_url
+        payload["poll_seconds"] = row.poll_seconds
+        payload["ics_allow_http"] = row.ics_allow_http
+        payload["ics_authorization_set"] = authorization_set
+    return payload
 
 
 def _sync_public(row: Source, state: SyncState | None) -> dict:
