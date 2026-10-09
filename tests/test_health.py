@@ -68,5 +68,5 @@ def test_mounted_routes() -> None:
     assert "/api/sync" in paths
     assert "/sync" in paths
     assert "/api/sources/{source_id}/sync" in paths
-    assert "/api/oauth/google/start" not in paths
-    assert "/api/oauth/google/callback" not in paths
+    assert "/api/oauth/google/start" in paths
+    assert "/api/oauth/google/callback" in paths

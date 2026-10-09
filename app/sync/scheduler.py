@@ -1,4 +1,4 @@
-"""Polls ICS sources. Google is left for a later phase."""
+"""Polls Google and ICS sources."""
 
 import asyncio
 from datetime import datetime, timezone
@@ -66,7 +66,7 @@ def due_source_ids(engine: Engine, now: datetime) -> list[str]:
     with Session(engine) as session:
         rows = session.scalars(select(Source).order_by(Source.created_at, Source.id)).all()
         for row in rows:
-            if row.kind != "ics" or row.enabled != 1 or not row.poll_seconds:
+            if row.kind not in {"google", "ics"} or row.enabled != 1 or not row.poll_seconds:
                 continue
             state = session.get(SyncState, row.id)
             if state is None or state.status in {"running", "na"}:

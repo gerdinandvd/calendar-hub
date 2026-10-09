@@ -572,7 +572,7 @@ def test_google_start_ends_without_a_write(tmp_path: Path, monkeypatch) -> None:
         assert started.status_code == 202
         assert wait_for(client.app.state.engine, source_id) == "error"
         assert _state(client.app.state.engine, source_id)["last_error_message"] == (
-            "Google import is not available yet."
+            "Google is not connected."
         )
         assert _puts(fake) == []
         with Session(client.app.state.engine) as session, session.begin():
@@ -716,7 +716,7 @@ def test_planner_uses_the_clock_and_a_changed_source_is_fetched_again(tmp_path: 
                     events_deleted=0,
                 )
             )
-        assert "google-due" not in due_source_ids(engine, moment + timedelta(seconds=3600))
+        assert "google-due" in due_source_ids(engine, moment + timedelta(seconds=3600))
     finally:
         _close(client)
         _close_server(server)

@@ -29,7 +29,8 @@ router = APIRouter()
 MAX_SOURCES = 20
 DEFAULT_TIMEZONE = "Europe/Amsterdam"
 DEFAULT_POLL_SECONDS = 900
-CREATABLE_KINDS = frozenset({"private", "webhook", "ics"})
+GOOGLE_POLL_SECONDS = 300
+CREATABLE_KINDS = frozenset({"private", "webhook", "ics", "google"})
 STATUS_LABELS = {
     "idle": "not yet started",
     "running": "busy",
@@ -70,6 +71,12 @@ class _IcsReady:
     header: str | None
 
 
+@dataclass(frozen=True)
+class _GoogleReady:
+    calendar_id: str
+    poll_seconds: int
+
+
 class SourceCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -81,6 +88,7 @@ class SourceCreate(BaseModel):
     ics_allow_http: int | None = None
     poll_seconds: int | None = None
     ics_authorization_header: str | None = None
+    google_calendar_id: str | None = None
 
 
 class SourcePatch(BaseModel):
@@ -94,6 +102,7 @@ class SourcePatch(BaseModel):
     poll_seconds: int | None = None
     ics_authorization_header: str | None = None
     clear_ics_authorization: int | None = None
+    google_calendar_id: str | None = None
 
 
 def create_source(
@@ -109,6 +118,7 @@ def create_source(
     ics_allow_http: int | None = None,
     poll_seconds: int | None = None,
     ics_authorization_header: str | None = None,
+    google_calendar_id: str | None = None,
 ) -> dict | SourceFailure:
     failure = _validate_new(
         kind,
@@ -119,6 +129,7 @@ def create_source(
         ics_allow_http=ics_allow_http,
         poll_seconds=poll_seconds,
         ics_authorization_header=ics_authorization_header,
+        google_calendar_id=google_calendar_id,
     )
     if failure is not None:
         return failure
@@ -142,6 +153,12 @@ def create_source(
                 header_cipher = encrypt(ready.header)
             except SecretKeyError as exc:
                 return _failure(500, str(exc))
+    google_ready: _GoogleReady | None = None
+    if kind == "google":
+        prepared = _prepare_google(google_calendar_id, poll_seconds, default_calendar=True)
+        if isinstance(prepared, SourceFailure):
+            return prepared
+        google_ready = prepared
     plaintext = ""
     ciphertext = None
     if kind == "webhook":
@@ -179,11 +196,11 @@ def create_source(
                 color=color,
                 collection_path=path,
                 enabled=bit,
-                poll_seconds=None if ready is None else ready.poll_seconds,
+                poll_seconds=_created_poll(ready, google_ready),
                 timezone=zone,
                 ics_url=None if ready is None else ready.url,
                 ics_allow_http=0 if ready is None else ready.allow_http,
-                google_calendar_id=None,
+                google_calendar_id=None if google_ready is None else google_ready.calendar_id,
                 created_at=stamp,
                 updated_at=stamp,
             )
@@ -224,6 +241,7 @@ def update_source(
     poll_seconds: int | None = None,
     ics_authorization_header: str | None = None,
     clear_ics_authorization: bool = False,
+    google_calendar_id: str | None = None,
 ) -> dict | SourceFailure:
     failure = _validate_change(name, timezone_name, enabled)
     if failure is not None:
@@ -241,16 +259,21 @@ def update_source(
         current_url = row.ics_url
         current_allow = row.ics_allow_http
         current_poll = row.poll_seconds
+        current_calendar = row.google_calendar_id
     ics_change = any(
         value is not None
-        for value in (ics_url, ics_allow_http, poll_seconds, ics_authorization_header)
+        for value in (ics_url, ics_allow_http, ics_authorization_header)
     ) or clear_ics_authorization
     if ics_change and current_kind != "ics":
         return _failure(422, "Those fields are only for an external ICS source.")
+    if poll_seconds is not None and current_kind not in {"ics", "google"}:
+        return _failure(422, "Those fields are only for a Google or external ICS source.")
+    if google_calendar_id is not None and current_kind != "google":
+        return _failure(422, "Those fields are only for a Google source.")
     ready: _IcsReady | None = None
     header_cipher = None
     header_action = "keep"
-    if current_kind == "ics" and ics_change:
+    if current_kind == "ics" and (ics_change or poll_seconds is not None):
         ready_or_failure = _prepare_ics(
             current_url if ics_url is None else ics_url,
             current_allow if ics_allow_http is None else ics_allow_http,
@@ -268,6 +291,16 @@ def update_source(
                 header_cipher = encrypt(ready.header)
             except SecretKeyError as exc:
                 return _failure(500, str(exc))
+    google_ready: _GoogleReady | None = None
+    if current_kind == "google" and (google_calendar_id is not None or poll_seconds is not None):
+        prepared = _prepare_google(
+            current_calendar if google_calendar_id is None else google_calendar_id,
+            current_poll if poll_seconds is None else poll_seconds,
+            default_calendar=False,
+        )
+        if isinstance(prepared, SourceFailure):
+            return prepared
+        google_ready = prepared
     new_name = current_name if name is None else name.strip()
     new_zone = current_zone if timezone_name is None else timezone_name.strip()
     new_enabled = current_enabled if enabled is None else enabled
@@ -292,13 +325,18 @@ def update_source(
                 row.ics_url = ready.url
                 row.ics_allow_http = ready.allow_http
                 row.poll_seconds = ready.poll_seconds
+            if google_ready is not None:
+                row.google_calendar_id = google_ready.calendar_id
+                row.poll_seconds = google_ready.poll_seconds
             drop_cursor = new_zone != current_zone or (
                 ready is not None and ready.url != current_url
             )
+            if google_ready is not None and google_ready.calendar_id != current_calendar:
+                drop_cursor = True
             if header_action != "keep":
                 _store_header(session, source_id, None if header_action == "clear" else header_cipher)
                 drop_cursor = True
-            if drop_cursor and row.kind == "ics":
+            if drop_cursor and row.kind in {"ics", "google"}:
                 state = session.get(SyncState, source_id)
                 if state is not None:
                     state.cursor = None
@@ -307,6 +345,7 @@ def update_source(
                 row,
                 session.get(SyncState, source_id),
                 authorization_set=_header_set(session, source_id),
+                google_connected=_google_connected(session, source_id),
             )
     except _Missing:
         if new_name != current_name:
@@ -362,6 +401,7 @@ def get_source(engine: Engine, source_id: str) -> dict | None:
             row,
             session.get(SyncState, source_id),
             authorization_set=_header_set(session, source_id),
+            google_connected=_google_connected(session, source_id),
         )
 
 
@@ -370,7 +410,12 @@ def list_sources(engine: Engine) -> list[dict]:
         rows = session.scalars(select(Source).order_by(Source.created_at, Source.id)).all()
         states = _states(session)
         return [
-            _public(row, states.get(row.id), authorization_set=_header_set(session, row.id))
+            _public(
+                row,
+                states.get(row.id),
+                authorization_set=_header_set(session, row.id),
+                google_connected=_google_connected(session, row.id),
+            )
             for row in rows
         ]
 
@@ -495,6 +540,7 @@ def post_source(body: SourceCreate, request: Request) -> dict:
         ics_allow_http=body.ics_allow_http,
         poll_seconds=body.poll_seconds,
         ics_authorization_header=body.ics_authorization_header,
+        google_calendar_id=body.google_calendar_id,
     )
     return _json(result)
 
@@ -521,6 +567,7 @@ def patch_source(source_id: str, body: SourcePatch, request: Request) -> dict:
         poll_seconds=body.poll_seconds,
         ics_authorization_header=body.ics_authorization_header,
         clear_ics_authorization=body.clear_ics_authorization == 1,
+        google_calendar_id=body.google_calendar_id,
     )
     return _json(result)
 
@@ -615,14 +662,18 @@ def _validate_new(
     ics_allow_http: int | None = None,
     poll_seconds: int | None = None,
     ics_authorization_header: str | None = None,
+    google_calendar_id: str | None = None,
 ) -> SourceFailure | None:
     if kind not in CREATABLE_KINDS:
-        return _failure(422, "Only a private, webhook, or external ICS source can be created.")
+        return _failure(422, "Only a private, webhook, external ICS, or Google source can be created.")
     if kind != "ics" and any(
-        value is not None
-        for value in (ics_url, ics_allow_http, poll_seconds, ics_authorization_header)
+        value is not None for value in (ics_url, ics_allow_http, ics_authorization_header)
     ):
         return _failure(422, "Those fields are only for an external ICS source.")
+    if kind not in {"ics", "google"} and poll_seconds is not None:
+        return _failure(422, "Those fields are only for a Google or external ICS source.")
+    if kind != "google" and google_calendar_id is not None:
+        return _failure(422, "Those fields are only for a Google source.")
     fields: dict[str, str] = {}
     if not name.strip():
         fields["name"] = "Enter a name."
@@ -818,7 +869,63 @@ def _status_code(row: Source, state: SyncState | None) -> str:
     return state.status
 
 
-def _public(row: Source, state: SyncState | None, *, authorization_set: bool = False) -> dict:
+def _created_poll(ready: _IcsReady | None, google_ready: _GoogleReady | None) -> int | None:
+    if ready is not None:
+        return ready.poll_seconds
+    if google_ready is not None:
+        return google_ready.poll_seconds
+    return None
+
+
+def _prepare_google(
+    calendar_id: str | None,
+    poll_seconds: int | None,
+    *,
+    default_calendar: bool,
+) -> _GoogleReady | SourceFailure:
+    fields: dict[str, str] = {}
+    if calendar_id is None or (default_calendar and not calendar_id.strip()):
+        calendar = "primary"
+    else:
+        calendar = calendar_id.strip()
+        error = _calendar_error(calendar)
+        if error:
+            fields["google_calendar_id"] = error
+    poll: int | SourceFailure
+    if poll_seconds is None:
+        poll = GOOGLE_POLL_SECONDS
+    else:
+        poll = _poll_value(poll_seconds)
+        if isinstance(poll, SourceFailure):
+            fields["poll_seconds"] = poll.detail
+    if fields:
+        return _failure(422, " ".join(fields.values()), fields)
+    return _GoogleReady(
+        calendar_id=calendar if "google_calendar_id" not in fields else "primary",
+        poll_seconds=poll if isinstance(poll, int) else GOOGLE_POLL_SECONDS,
+    )
+
+
+def _calendar_error(value: str) -> str | None:
+    if not value or any(char in value for char in "\r\n\t "):
+        return "Enter a calendar id."
+    if len(value) > 1024:
+        return "Enter a calendar id."
+    return None
+
+
+def _google_connected(session: Session, source_id: str) -> bool:
+    secret = session.get(SourceSecret, source_id)
+    return bool(secret is not None and secret.oauth_refresh_token)
+
+
+def _public(
+    row: Source,
+    state: SyncState | None,
+    *,
+    authorization_set: bool = False,
+    google_connected: bool = False,
+) -> dict:
     info = KINDS.get(row.kind, KindInfo(row.color, row.color, row.kind))
     status = _status_code(row, state)
     payload = {
@@ -842,6 +949,10 @@ def _public(row: Source, state: SyncState | None, *, authorization_set: bool = F
         payload["poll_seconds"] = row.poll_seconds
         payload["ics_allow_http"] = row.ics_allow_http
         payload["ics_authorization_set"] = authorization_set
+    if row.kind == "google":
+        payload["google_calendar_id"] = row.google_calendar_id
+        payload["poll_seconds"] = row.poll_seconds
+        payload["google_connected"] = google_connected
     return payload
 
 

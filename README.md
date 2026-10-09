@@ -1,6 +1,6 @@
 # Calendar Hub
 
-Personal hub that puts calendar sources in one place. The stack starts five services. Caddy terminates TLS and asks for basic auth in front of the hub. This build manages private calendars and webhook sources. An incoming webhook is written into that source's CalDAV collection. Google, ICS, the planner, and backups are not included yet.
+Personal hub that puts calendar sources in one place. The stack starts five services. Caddy terminates TLS and asks for basic auth in front of the hub. This build manages private calendars, webhook sources, external ICS feeds, and a read-only Google calendar. Backups are not included yet.
 
 ## Tests without Docker
 
@@ -29,6 +29,8 @@ Five services should be running: `hub`, `radicale`, `caddy`, `litestream`, and `
 Add a private source from Sources. The calendars page lists its name, color, and collection URL. Clients sign in as `HUB_USER` on that URL. Turning a source off keeps the collection. Deleting a source asks you to confirm, because the collection is deleted with it.
 
 Add a webhook from Sources. The page shows the endpoint and the secret once. After that it says the secret is set. Rotate secret replaces it immediately. The sync page shows whether the last run succeeded. A webhook with the source turned off is refused and does not change the calendar.
+
+Add a Google calendar from Sources. Its page links to Google and says the connection only reads and does not write back. A live account needs `HUB_GOOGLE_CLIENT_ID` and `HUB_GOOGLE_CLIENT_SECRET`, with the redirect URL `/api/oauth/google/callback`. Without those values the hub still runs.
 
 `/api/webhooks/` and `/api/oauth/google/callback` do not ask for basic auth. `/radicale/` asks Radicale for the `HUB_USER` password. The internal account does not work through Caddy. Hub and Radicale do not publish a port themselves. The hub does not mount the Radicale volume.
 

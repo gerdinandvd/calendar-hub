@@ -1,10 +1,10 @@
-"""Sync run per source: one slot, status transitions, webhook writes, and ICS import."""
+"""Sync run per source: one slot, status transitions, webhook, ICS, and Google import."""
 
 import threading
 import time
 import uuid
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 
 from sqlalchemy import select
@@ -14,9 +14,9 @@ from sqlalchemy.orm import Session
 from app.db.models import EventMapping, Source, SourceSecret, SyncState
 from app.log import log_mutation
 from app.radicale.client import RadicaleClient, RadicaleError
-from app.secrets import SecretKeyError, decrypt
+from app.secrets import SecretKeyError, decrypt, encrypt
 from app.sync import google
-from app.sync.ical import CalendarObject, build_object
+from app.sync.ical import CalendarObject, CalendarParseError, build_object, merge_partial, parse_vcalendar
 from app.sync.ics import (
     FeedSnapshot,
     IcsError,
@@ -274,12 +274,17 @@ def _import_pull(engine: Engine, radicale: RadicaleClient, source_id: str) -> _I
         allow_http = row.ics_allow_http == 1
         cursor_raw = state.cursor
         collection = row.collection_path
+        calendar_id = row.google_calendar_id or ""
     if kind == "google":
-        try:
-            google.import_source()
-        except google.NotAvailable as exc:
-            raise SyncFailed(exc.message) from None
-        return _Imported(RunStats(), None, False)
+        return _import_google(
+            engine,
+            radicale,
+            source_id,
+            collection,
+            calendar_id,
+            cursor_raw,
+            timezone_name,
+        )
     if kind != "ics":
         raise SyncFailed("Sync is not used for this source.")
     try:
@@ -300,6 +305,287 @@ def _import_pull(engine: Engine, radicale: RadicaleClient, source_id: str) -> _I
     if _STOP.is_set():
         raise SyncFailed(PROCESS_STOPPED, stats)
     return _Imported(stats, dump_cursor(loaded.etag, loaded.last_modified), True)
+
+
+def _import_google(
+    engine: Engine,
+    radicale: RadicaleClient,
+    source_id: str,
+    collection: str,
+    calendar_id: str,
+    cursor_raw: str | None,
+    timezone_name: str,
+) -> _Imported:
+    loaded = _google_tokens(engine, source_id)
+    if loaded is None:
+        raise SyncFailed(google.NOT_CONNECTED)
+    try:
+        snapshot = google.fetch_events(
+            calendar_id=calendar_id,
+            cursor=cursor_raw,
+            tokens=loaded,
+            source_timezone=timezone_name,
+            on_invalid_cursor=lambda: _clear_cursor(engine, source_id),
+        )
+    except google.ScopeRejected as exc:
+        raise SyncFailed(exc.message) from None
+    except google.GoogleError as exc:
+        if exc.invalidate_cursor:
+            _clear_cursor(engine, source_id)
+        raise SyncFailed(exc.message) from None
+    _store_google_tokens(engine, source_id, snapshot.tokens)
+    if _STOP.is_set():
+        if snapshot.cursor_invalidated:
+            _clear_cursor(engine, source_id)
+        raise SyncFailed(PROCESS_STOPPED)
+    try:
+        stats = _apply_google(engine, radicale, source_id, collection, timezone_name, snapshot)
+    except SyncFailed:
+        if snapshot.cursor_invalidated:
+            _clear_cursor(engine, source_id)
+        raise
+    if _STOP.is_set():
+        if snapshot.cursor_invalidated:
+            _clear_cursor(engine, source_id)
+        raise SyncFailed(PROCESS_STOPPED, stats)
+    return _Imported(stats, snapshot.sync_token, True)
+
+
+def _apply_google(
+    engine: Engine,
+    radicale: RadicaleClient,
+    source_id: str,
+    collection: str,
+    timezone_name: str,
+    snapshot: google.GoogleSnapshot,
+) -> RunStats:
+    stats = RunStats(seen=len(snapshot.changes))
+    present: set[str] = set()
+    for change in snapshot.changes:
+        if _STOP.is_set():
+            raise SyncFailed(PROCESS_STOPPED, stats)
+        if change.cancelled:
+            try:
+                removed = _delete_external(engine, radicale, source_id, collection, change.external_id)
+            except SyncFailed as exc:
+                raise SyncFailed(exc.message, stats) from None
+            if removed:
+                stats.deleted += 1
+            continue
+        present.add(change.external_id)
+        try:
+            wrote = _upsert_google(
+                engine,
+                radicale,
+                source_id,
+                collection,
+                timezone_name,
+                change,
+            )
+        except SyncFailed as exc:
+            raise SyncFailed(exc.message, stats) from None
+        if wrote:
+            stats.upserted += 1
+    if snapshot.full:
+        _delete_absent(engine, radicale, source_id, collection, present, stats)
+    return stats
+
+
+def _upsert_google(
+    engine: Engine,
+    radicale: RadicaleClient,
+    source_id: str,
+    collection: str,
+    timezone_name: str,
+    change: google.GoogleChange,
+) -> bool:
+    with Session(engine) as session:
+        mapping = load_mapping(session, source_id, change.external_id)
+        found = mapping is not None
+        deleted = mapping.deleted_at if mapping is not None else None
+        version = mapping.external_version if mapping is not None else None
+        if mapping is not None:
+            ical_uid = mapping.ical_uid
+        elif change.ical_uid:
+            ical_uid = change.ical_uid
+        else:
+            ical_uid = new_uid()
+    if change.replace or not found or deleted is not None:
+        obj = _object_from_change(change, ical_uid)
+    else:
+        obj = _merged_google(radicale, collection, timezone_name, change, ical_uid)
+    body = build_object(obj).encode("utf-8")
+    path = event_path(collection, ical_uid)
+    if found and deleted is None and version == change.etag:
+        try:
+            current = radicale.get_event(path)
+        except RadicaleError:
+            raise SyncFailed("The event could not be saved.") from None
+        if current == body:
+            return False
+    try:
+        radicale.put_event(path, body)
+    except RadicaleError:
+        raise SyncFailed("The event could not be saved.") from None
+    when = _now()
+    with Session(engine) as session, session.begin():
+        _remember_mapping(session, source_id, change.external_id, ical_uid, change.etag, when)
+    return True
+
+
+def _object_from_change(change: google.GoogleChange, uid: str) -> CalendarObject:
+    if change.master is None:
+        raise SyncFailed("The event could not be saved.")
+    chosen: list = []
+    for mark in change.master.exdates + change.added_exdates:
+        if not any(mark.value == item.value and mark.all_day == item.all_day for item in chosen):
+            chosen.append(mark)
+    master = replace(change.master, uid=uid, exdates=tuple(chosen))
+    components = [master]
+    components.extend(replace(item, uid=uid) for item in change.exceptions)
+    return CalendarObject(uid=uid, version=change.etag, components=tuple(components))
+
+
+def _merged_google(
+    radicale: RadicaleClient,
+    collection: str,
+    timezone_name: str,
+    change: google.GoogleChange,
+    ical_uid: str,
+) -> CalendarObject:
+    path = event_path(collection, ical_uid)
+    try:
+        current = radicale.get_event(path)
+    except RadicaleError:
+        raise SyncFailed("The event could not be saved.") from None
+    if not current:
+        return _object_from_change(change, ical_uid)
+    try:
+        parsed = parse_vcalendar(current.decode("utf-8"), timezone_name)
+    except (UnicodeError, CalendarParseError):
+        raise SyncFailed("The event could not be saved.") from None
+    if len(parsed) != 1:
+        raise SyncFailed("The event could not be saved.")
+    try:
+        return merge_partial(
+            parsed[0],
+            change.master,
+            change.exceptions,
+            change.added_exdates,
+            uid=ical_uid,
+            version=change.etag,
+        )
+    except CalendarParseError:
+        raise SyncFailed("The event could not be saved.") from None
+
+
+def _delete_absent(
+    engine: Engine,
+    radicale: RadicaleClient,
+    source_id: str,
+    collection: str,
+    present: set[str],
+    stats: RunStats,
+) -> None:
+    with Session(engine) as session:
+        rows = session.scalars(
+            select(EventMapping).where(
+                EventMapping.source_id == source_id,
+                EventMapping.deleted_at.is_(None),
+            )
+        ).all()
+        missing = [row.external_id for row in rows if row.external_id not in present]
+    for external_id in missing:
+        if _STOP.is_set():
+            raise SyncFailed(PROCESS_STOPPED, stats)
+        try:
+            removed = _delete_external(engine, radicale, source_id, collection, external_id)
+        except SyncFailed as exc:
+            raise SyncFailed(exc.message, stats) from None
+        if removed:
+            stats.deleted += 1
+
+
+def _delete_external(
+    engine: Engine,
+    radicale: RadicaleClient,
+    source_id: str,
+    collection: str,
+    external_id: str,
+) -> bool:
+    with Session(engine) as session:
+        mapping = load_mapping(session, source_id, external_id)
+        if mapping is None or mapping.deleted_at:
+            return False
+        uid = mapping.ical_uid
+    path = event_path(collection, uid)
+    try:
+        radicale.delete_event(path)
+    except RadicaleError:
+        raise SyncFailed("The event could not be saved.") from None
+    when = _now()
+    with Session(engine) as session, session.begin():
+        mapping = load_mapping(session, source_id, external_id)
+        if mapping is not None and mapping.deleted_at is None:
+            remember_delete(mapping, when)
+    return True
+
+
+def _google_tokens(engine: Engine, source_id: str) -> google.TokenBundle | None:
+    with Session(engine) as session:
+        secret = session.get(SourceSecret, source_id)
+        refresh = None if secret is None else secret.oauth_refresh_token
+        access = None if secret is None else secret.oauth_access_token
+        expiry = None if secret is None else secret.oauth_expiry
+    if not refresh:
+        return None
+    try:
+        return google.TokenBundle(
+            refresh_token=decrypt(refresh),
+            access_token=decrypt(access) if access else "",
+            expiry=decrypt(expiry) if expiry else "",
+        )
+    except SecretKeyError:
+        raise SyncFailed(google.FETCH_MESSAGE) from None
+
+
+def _store_google_tokens(engine: Engine, source_id: str, tokens: google.TokenBundle) -> None:
+    with Session(engine) as session, session.begin():
+        secret = session.get(SourceSecret, source_id)
+        if secret is None:
+            session.add(
+                SourceSecret(
+                    source_id=source_id,
+                    webhook_secret=None,
+                    oauth_refresh_token=encrypt(tokens.refresh_token),
+                    oauth_access_token=encrypt(tokens.access_token),
+                    oauth_expiry=encrypt(tokens.expiry),
+                    ics_authorization_header=None,
+                )
+            )
+            return
+        try:
+            current_refresh = decrypt(secret.oauth_refresh_token) if secret.oauth_refresh_token else ""
+            current_access = decrypt(secret.oauth_access_token) if secret.oauth_access_token else ""
+            current_expiry = decrypt(secret.oauth_expiry) if secret.oauth_expiry else ""
+        except SecretKeyError:
+            raise SyncFailed(google.FETCH_MESSAGE) from None
+        if (
+            current_refresh == tokens.refresh_token
+            and current_access == tokens.access_token
+            and current_expiry == tokens.expiry
+        ):
+            return
+        secret.oauth_refresh_token = encrypt(tokens.refresh_token)
+        secret.oauth_access_token = encrypt(tokens.access_token)
+        secret.oauth_expiry = encrypt(tokens.expiry)
+
+
+def _clear_cursor(engine: Engine, source_id: str) -> None:
+    with Session(engine) as session, session.begin():
+        state = session.get(SyncState, source_id)
+        if state is not None and state.status != "na":
+            state.cursor = None
 
 
 def _ics_authorization(engine: Engine, source_id: str) -> str | None:
@@ -385,11 +671,11 @@ def _upsert_object(
         raise SyncFailed("The event could not be saved.") from None
     when = _now()
     with Session(engine) as session, session.begin():
-        _remember_ics(session, source_id, obj.uid, ical_uid, obj.version, when)
+        _remember_mapping(session, source_id, obj.uid, ical_uid, obj.version, when)
     return True
 
 
-def _remember_ics(
+def _remember_mapping(
     session: Session,
     source_id: str,
     external_id: str,

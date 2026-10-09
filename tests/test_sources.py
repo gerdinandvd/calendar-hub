@@ -161,7 +161,6 @@ def test_invalid_source_input_does_not_create_a_collection(tmp_path: Path, monke
     try:
         cases = [
             {"name": "   "},
-            {"name": "Home", "kind": "google"},
             {"name": "Home", "timezone": "Not/AZone"},
             {"name": "Home", "color": "#ffffff"},
             {"name": "Home", "enabled": 2},

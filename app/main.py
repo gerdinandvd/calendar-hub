@@ -8,6 +8,8 @@ from fastapi import FastAPI
 from app.access import install_access
 from app.api.caldav_info import router as caldav_router
 from app.api.health import router as health_router
+from app.api.oauth import OAuthStates
+from app.api.oauth import router as oauth_router
 from app.api.sources import ensure_sync_states
 from app.api.sources import router as sources_router
 from app.api.sync import router as sync_router
@@ -33,6 +35,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         Base.metadata.create_all(engine)
         ensure_sync_states(engine)
         app.state.webhook_rates = RateLimiter()
+        app.state.oauth_states = OAuthStates()
         arm()
         scheduler = Scheduler(engine, app.state.radicale)
         app.state.scheduler = scheduler
@@ -53,6 +56,7 @@ def create_app() -> FastAPI:
     application.include_router(sources_router)
     application.include_router(sync_router)
     application.include_router(webhooks_router)
+    application.include_router(oauth_router)
     application.include_router(caldav_router)
     application.include_router(pages_router)
     return application

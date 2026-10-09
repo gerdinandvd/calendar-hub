@@ -6,6 +6,9 @@
 {% else %}
 {% include "source_form.html" %}
 {% endif %}
+{% if google_connect %}
+<p><a href="{{ google_connect.href }}">{{ google_connect.label }}</a></p>
+{% endif %}
 {% if webhook_url %}
 {% include "webhook_panel.html" %}
 {% endif %}
