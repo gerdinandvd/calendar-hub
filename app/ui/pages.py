@@ -8,6 +8,7 @@ from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.templating import Jinja2Templates
 
 from app.api.caldav_info import build_caldav_info
+from app.api.health import report as health_report
 from app.api.sources import (
     DEFAULT_POLL_SECONDS,
     GOOGLE_POLL_SECONDS,
@@ -252,6 +253,24 @@ def calendars_page(request: Request) -> HTMLResponse:
     )
 
 
+@router.get("/health")
+def health_page(request: Request) -> HTMLResponse:
+    return _page(
+        request,
+        "health.html",
+        {"title": "Health", "health": _health(request)},
+    )
+
+
+@router.get("/health/panel")
+def health_panel(request: Request) -> HTMLResponse:
+    return templates.TemplateResponse(
+        request,
+        "health_panel.html",
+        {"health": _health(request)},
+    )
+
+
 @router.get("/sync")
 def sync_page(request: Request) -> HTMLResponse:
     return _page(
@@ -282,6 +301,10 @@ def stylesheet() -> FileResponse:
 @router.get("/htmx.min.js")
 def htmx_script() -> FileResponse:
     return FileResponse(_ADMIN / "htmx.min.js", media_type="text/javascript")
+
+
+def _health(request: Request) -> dict[str, object]:
+    return health_report(request.app.state.engine, request.app.state.radicale)
 
 
 def _page(request: Request, name: str, context: dict) -> HTMLResponse:

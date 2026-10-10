@@ -1,1 +1,4 @@
-# Placeholder. Snapshots come later. This service starts Kopia and does not take a snapshot.
+# Runtime loop is deploy/kopia-entrypoint.sh.
+# Filesystem repository for the local substitute, or a private B2 bucket.
+# Snapshot of the Radicale volume every 6 hours. No Kopia server and no UI.
+# The repository password is separate from the hub encryption key. That key is not in the snapshot.

@@ -7,6 +7,7 @@ from fastapi import FastAPI
 
 from app.access import install_access
 from app.api.caldav_info import router as caldav_router
+from app.api.health import Heartbeat
 from app.api.health import router as health_router
 from app.api.oauth import OAuthStates
 from app.api.oauth import router as oauth_router
@@ -37,11 +38,17 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         app.state.webhook_rates = RateLimiter()
         app.state.oauth_states = OAuthStates()
         arm()
+        heartbeat = Heartbeat()
+        app.state.heartbeat = heartbeat
+        heartbeat.start()
         scheduler = Scheduler(engine, app.state.radicale)
         app.state.scheduler = scheduler
         scheduler.start()
         yield
     finally:
+        heartbeat = getattr(app.state, "heartbeat", None)
+        if heartbeat is not None:
+            await heartbeat.shutdown()
         scheduler = getattr(app.state, "scheduler", None)
         if scheduler is not None:
             await scheduler.shutdown()

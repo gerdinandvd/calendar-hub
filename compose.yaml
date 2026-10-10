@@ -2,11 +2,18 @@ services:
   hub:
     build: .
     env_file:
-      - .env
+      - ${HUB_ENV_FILE:-.env}
     environment:
       HUB_RADICALE_URL: http://radicale:5232
+      HUB_LITESTREAM_STATUS_PATH: /status/litestream-sync
+      HUB_LITESTREAM_HEARTBEAT_PATH: /status/litestream-heartbeat
+      HUB_KOPIA_STATUS_PATH: /status/kopia-backup
     volumes:
       - hub-data:/data
+      - status:/status
+    depends_on:
+      radicale:
+        condition: service_healthy
     networks:
       - internal
     healthcheck:
@@ -26,7 +33,7 @@ services:
   radicale:
     image: tomsquest/docker-radicale:3.8.1.1
     env_file:
-      - .env
+      - ${HUB_ENV_FILE:-.env}
     environment:
       TAKE_FILE_OWNERSHIP: "true"
     volumes:
@@ -53,9 +60,9 @@ services:
   caddy:
     image: caddy:2.11.7
     env_file:
-      - .env
+      - ${HUB_ENV_FILE:-.env}
     ports:
-      - "8443:443"
+      - "${HUB_HTTPS_PORT:-8443}:443"
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - ./deploy/caddy-entrypoint.sh:/usr/local/bin/calendar-hub-caddy.sh:ro
@@ -78,12 +85,21 @@ services:
 
   litestream:
     image: litestream/litestream:0.5.17
-    entrypoint: ["/bin/sh", "-c"]
-    command: ["/usr/local/bin/litestream version && exec sleep infinity"]
+    env_file:
+      - ${HUB_ENV_FILE:-.env}
+    environment:
+      LITESTREAM_REPLICA_URL: ${LITESTREAM_REPLICA_URL:-file:///replica/hub}
+    entrypoint: ["/bin/sh", "/usr/local/bin/calendar-hub-litestream.sh"]
     volumes:
-      - ./deploy/litestream.yml:/etc/litestream.yml:ro
+      - hub-data:/data
+      - litestream-replica:/replica
+      - status:/status
+      - ./deploy/litestream-entrypoint.sh:/usr/local/bin/calendar-hub-litestream.sh:ro
     networks:
       - internal
+    depends_on:
+      hub:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "/usr/local/bin/litestream", "version"]
       interval: 10s
@@ -94,18 +110,35 @@ services:
 
   backup:
     image: kopia/kopia:0.23.1
-    entrypoint: ["/bin/sh", "-c"]
-    command: ["/bin/kopia --version && exec sleep infinity"]
+    hostname: backup
+    env_file:
+      - ${HUB_ENV_FILE:-.env}
+    environment:
+      KOPIA_PASSWORD: ${KOPIA_PASSWORD:-local-dev-only}
+      KOPIA_REPOSITORY: ${KOPIA_REPOSITORY:-filesystem}
+      KOPIA_REPO_PATH: ${KOPIA_REPO_PATH:-/repo}
+      KOPIA_CACHE_DIRECTORY: /cache
+      KOPIA_CONFIG_PATH: /cache/kopia.config
+      KOPIA_LOG_DIR: /cache/log
+      KOPIA_CHECK_FOR_UPDATES: "false"
+    entrypoint: ["/bin/sh", "/usr/local/bin/calendar-hub-kopia.sh"]
     volumes:
-      - ./deploy/kopia.yml:/etc/kopia.yml:ro
+      - radicale-data:/source:ro
+      - kopia-repo:/repo
+      - kopia-cache:/cache
+      - status:/status
+      - ./deploy/kopia-entrypoint.sh:/usr/local/bin/calendar-hub-kopia.sh:ro
     networks:
       - internal
+    depends_on:
+      radicale:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "/bin/kopia", "--version"]
       interval: 10s
       timeout: 5s
       retries: 6
-      start_period: 5s
+      start_period: 15s
     restart: unless-stopped
 
 networks:
@@ -116,3 +149,7 @@ volumes:
   radicale-data:
   caddy-data:
   caddy-config:
+  status:
+  litestream-replica:
+  kopia-repo:
+  kopia-cache:

@@ -1,1 +1,5 @@
-# Placeholder. Replication comes later. This service starts Litestream and does not replicate.
+# Runtime config is written by deploy/litestream-entrypoint.sh.
+# Local replica: file:///replica/hub
+# VPS replica: s3://PRIVATE-BUCKET/hub?endpoint=s3.REGION.backblazeb2.com&region=REGION
+# Credentials stay in the environment (AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY).
+# The hub key is not part of this file. Startup does not restore the database.

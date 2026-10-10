@@ -118,7 +118,6 @@ def stack() -> Iterator[dict[str, str]]:
 
 @pytest.mark.integration
 def test_stack_cold_start(stack: dict[str, str]) -> None:
-    del stack
     ps = _compose(ROOT, "ps", "--format", "json")
     assert ps.returncode == 0, ps.stderr
     services = {item["Service"]: item for item in _parse_ps(ps.stdout)}
@@ -146,6 +145,14 @@ def test_stack_cold_start(stack: dict[str, str]) -> None:
         assert probe.connect_ex(("127.0.0.1", 5232)) != 0
     finally:
         probe.close()
+
+    owner = _basic(stack["HUB_USER"], stack["HUB_PASSWORD"])
+    status, raw, _ = _https("GET", "/api/health", {"Authorization": owner})
+    assert status == 200, raw[:300]
+    body = json.loads(raw)
+    assert body["sqlite"] == "ok"
+    assert body["radicale"] == "ok"
+    assert body["radicale_error"] == ""
 
 
 @pytest.mark.integration

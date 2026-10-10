@@ -82,6 +82,21 @@ class RadicaleClient:
             raise RadicaleError("The calendar could not be saved.")
         return payload
 
+    def reachable(self) -> bool:
+        """Short probe for the health section. A miss is an error, not a raised failure."""
+
+        try:
+            status, _headers, _payload = self._call(
+                "PROPFIND",
+                "/",
+                _event_count_body(),
+                depth="0",
+                timeout=2,
+            )
+        except RadicaleError:
+            return False
+        return status in {200, 207}
+
     def count_events(self, path: str) -> int:
         status, _headers, payload = self._call(
             "PROPFIND",
@@ -136,6 +151,7 @@ class RadicaleClient:
         content_type: str | None = None,
         if_match: str | None = None,
         depth: str | None = None,
+        timeout: float = 10,
     ) -> tuple[int, dict[str, str], bytes]:
         parsed = urlsplit(self.base_url)
         if parsed.scheme != "http" or not parsed.hostname:
@@ -150,7 +166,7 @@ class RadicaleClient:
             headers["If-Match"] = if_match
         if depth:
             headers["Depth"] = depth
-        connection = http.client.HTTPConnection(parsed.hostname, port, timeout=10)
+        connection = http.client.HTTPConnection(parsed.hostname, port, timeout=timeout)
         try:
             try:
                 connection.request(method, path, body=body, headers=headers)
