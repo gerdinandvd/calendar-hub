@@ -7,8 +7,10 @@ import re
 import socket
 import ssl
 import subprocess
+import threading
 import time
 from collections.abc import Iterator
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import quote, urlparse
 
@@ -478,3 +480,331 @@ def test_webhook_upsert_is_readable_via_caldav(stack: dict[str, str]) -> None:
     assert b"DTSTART;TZID=Europe/Amsterdam:20261007T090015" in stored
     assert b"DTEND;TZID=Europe/Amsterdam:20261007T100015" in stored
     assert b"SUMMARY:Webhook title" in stored
+
+
+class _FeedHandler(BaseHTTPRequestHandler):
+    body = b""
+
+    def do_GET(self) -> None:
+        payload = _FeedHandler.body
+        self.send_response(200)
+        self.send_header("Content-Type", "text/calendar")
+        self.send_header("ETag", '"bench"')
+        self.send_header("Content-Length", str(len(payload)))
+        self.end_headers()
+        self.wfile.write(payload)
+
+    def log_message(self, format: str, *args: object) -> None:
+        return
+
+
+def _feed_server(body: bytes) -> tuple[ThreadingHTTPServer, str]:
+    _FeedHandler.body = body
+    server = ThreadingHTTPServer(("0.0.0.0", 0), _FeedHandler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    port = server.server_address[1]
+    return server, f"http://host.docker.internal:{port}/feed.ics"
+
+
+def _calendar(count: int) -> bytes:
+    lines = ["BEGIN:VCALENDAR", "VERSION:2.0"]
+    for number in range(count):
+        lines.extend(
+            [
+                "BEGIN:VEVENT",
+                f"UID:e{number}",
+                "DTSTAMP:20261001T080000Z",
+                "DTSTART;TZID=Europe/Amsterdam:20261007T090015",
+                "DTEND;TZID=Europe/Amsterdam:20261007T100015",
+                f"SUMMARY:e{number}",
+                "END:VEVENT",
+            ]
+        )
+    lines.append("END:VCALENDAR")
+    return ("\r\n".join(lines) + "\r\n").encode()
+
+
+def _make_room(owner: str, needed: int) -> None:
+    sources = _sources(owner)
+    extras = [item for item in sources if str(item["name"]).startswith("Bench ")]
+    while len(sources) + needed > 20 and extras:
+        victim = extras.pop()
+        status, body = _json_call(
+            "DELETE",
+            f"/api/sources/{victim['id']}?confirm=true",
+            owner,
+            {},
+        )
+        assert status == 200, body
+        sources = _sources(owner)
+    assert len(sources) + needed <= 20, [item["name"] for item in sources]
+
+
+def _sources(owner: str) -> list[dict]:
+    status, body = _json_call("GET", "/api/sources", owner)
+    assert status == 200, body
+    return body["sources"]
+
+
+def _sync_row(owner: str, source_id: str) -> dict:
+    status, body = _json_call("GET", "/api/sync", owner)
+    assert status == 200, body
+    return next(item for item in body["sources"] if item["id"] == source_id)
+
+
+def _wait_sync(owner: str, source_id: str, timeout: float) -> dict:
+    deadline = time.monotonic() + timeout
+    row = _sync_row(owner, source_id)
+    while row["status"] == "running" and time.monotonic() < deadline:
+        time.sleep(0.5)
+        row = _sync_row(owner, source_id)
+    return row
+
+
+def _start_sync(owner: str, source_id: str) -> None:
+    status, body = _json_call("POST", f"/api/sources/{source_id}/sync", owner, {})
+    assert status in {202, 409}, body
+
+
+def _memory_bytes(text: str) -> int:
+    match = re.match(r"([0-9]+(?:[.,][0-9]+)?)\s*([A-Za-z]+)", text.strip())
+    assert match is not None, text
+    number = float(match.group(1).replace(",", "."))
+    unit = match.group(2).lower()
+    scale = {
+        "b": 1,
+        "kib": 1024,
+        "kb": 1000,
+        "mib": 1024**2,
+        "mb": 1000**2,
+        "gib": 1024**3,
+        "gb": 1000**3,
+    }
+    assert unit in scale, text
+    return int(number * scale[unit])
+
+
+def _sample_hub(container: str) -> tuple[int, float]:
+    stats = subprocess.run(
+        ["docker", "stats", "--no-stream", "--format", "{{.MemUsage}}\t{{.CPUPerc}}", container],
+        check=False,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+    assert stats.returncode == 0, stats.stderr
+    line = stats.stdout.strip().splitlines()[-1]
+    memory, cpu = line.split("\t")
+    assert cpu.endswith("%"), cpu
+    return _memory_bytes(memory.split("/")[0]), float(cpu[:-1].strip())
+
+
+def _event_bytes(uid: str, summary: str) -> bytes:
+    text = (
+        "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//calendar-hub//EN\r\n"
+        "BEGIN:VEVENT\r\n"
+        f"UID:{uid}\r\nDTSTAMP:20261008T060000Z\r\n"
+        "DTSTART:20261008T090000Z\r\nDTEND:20261008T100000Z\r\n"
+        f"SUMMARY:{summary}\r\n"
+        "END:VEVENT\r\nEND:VCALENDAR\r\n"
+    )
+    return text.encode()
+
+
+def _put_event(path: str, owner: str, body: bytes) -> None:
+    status, _, _ = _https(
+        "PUT",
+        path,
+        {"Authorization": owner, "Content-Type": "text/calendar"},
+        body,
+    )
+    assert status in {200, 201, 204}, status
+
+
+def _get_event(path: str, owner: str) -> tuple[str, bytes]:
+    status, headers, payload = _exchange("GET", path, {"Authorization": owner})
+    assert status == 200, payload[:200]
+    return headers.get("etag", ""), payload
+
+
+@pytest.mark.integration
+def test_five_thousand_events_stay_within_memory_and_cpu(stack: dict[str, str]) -> None:
+    owner = _basic(stack["HUB_USER"], stack["HUB_PASSWORD"])
+    have = len(_sources(owner))
+    assert have <= 19, have
+    for number in range(19 - have):
+        status, created = _json_call("POST", "/api/sources", owner, {"name": f"Bench {number}"})
+        assert status == 201, created
+    server, url = _feed_server(_calendar(5000))
+    try:
+        status, created = _json_call(
+            "POST",
+            "/api/sources",
+            owner,
+            {
+                "name": "Large feed",
+                "kind": "ics",
+                "ics_url": url,
+                "ics_allow_http": 1,
+                "poll_seconds": 86400,
+            },
+        )
+        assert status == 201, created
+        assert len(_sources(owner)) == 20
+        container = _compose(ROOT, "ps", "-q", "hub").stdout.strip()
+        assert container
+        peaks = {"memory": 0, "cpu": 0.0, "samples": 0}
+        stop = threading.Event()
+
+        def sample() -> None:
+            while not stop.is_set():
+                try:
+                    memory, cpu = _sample_hub(container)
+                except (AssertionError, OSError):
+                    stop.wait(15)
+                    continue
+                peaks["memory"] = max(peaks["memory"], memory)
+                peaks["cpu"] = max(peaks["cpu"], cpu)
+                peaks["samples"] += 1
+                stop.wait(15)
+
+        sampler = threading.Thread(target=sample)
+        sampler.start()
+        try:
+            _start_sync(owner, created["id"])
+            row = _wait_sync(owner, created["id"], 600)
+        finally:
+            stop.set()
+            sampler.join(30)
+        assert row["status"] == "ok", {
+            "status": row["status"],
+            "message": row.get("last_error_message"),
+            "seen": row.get("events_seen"),
+            "upserted": row.get("events_upserted"),
+        }
+        assert row["events_seen"] == 5000
+        assert row["events_upserted"] == 5000
+        assert peaks["samples"] > 0
+        peak_memory = peaks["memory"]
+        peak_cpu = peaks["cpu"]
+        assert peak_memory < 512 * 1024 * 1024, peak_memory
+        assert peak_cpu < 100, peak_cpu
+        collection = urlparse(created["collection_url"]).path
+        status, stored, _ = _https("GET", f"{collection}e0.ics", {"Authorization": owner})
+        assert status == 200
+        assert b"UID:e0" in stored
+        assert b"SUMMARY:e0" in stored
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+@pytest.mark.integration
+def test_etag_stays_stable_across_twenty_propfinds(stack: dict[str, str]) -> None:
+    owner = _basic(stack["HUB_USER"], stack["HUB_PASSWORD"])
+    _make_room(owner, 2)
+    status, private = _json_call("POST", "/api/sources", owner, {"name": "Quiet private"})
+    assert status == 201, private
+    collection = urlparse(private["collection_url"]).path
+    event = f"{collection}quiet-1.ics"
+    _put_event(event, owner, _event_bytes("quiet-1", "Quiet title"))
+    server, url = _feed_server(_calendar(1))
+    try:
+        status, ics = _json_call(
+            "POST",
+            "/api/sources",
+            owner,
+            {
+                "name": "Quiet feed",
+                "kind": "ics",
+                "ics_url": url,
+                "ics_allow_http": 1,
+                "poll_seconds": 86400,
+            },
+        )
+        assert status == 201, ics
+        _start_sync(owner, ics["id"])
+        synced = _wait_sync(owner, ics["id"], 60)
+        assert synced["status"] == "ok", synced
+        before = {item["id"]: item.get("poll_seconds") for item in _sources(owner)}
+        etag, body = _get_event(event, owner)
+        assert b"UID:quiet-1" in body
+        assert b"SUMMARY:Quiet title" in body
+        minute_etag, minute_body = etag, body
+        for number in range(20):
+            status, payload = _propfind(collection, owner)
+            assert status == 207, payload[:300]
+            if number < 19:
+                time.sleep(60)
+            if number == 0:
+                minute_etag, minute_body = _get_event(event, owner)
+        later_etag, later_body = _get_event(event, owner)
+        assert later_etag == etag == minute_etag
+        assert later_body == body == minute_body
+        after = {item["id"]: item.get("poll_seconds") for item in _sources(owner)}
+        assert after == before
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+@pytest.mark.integration
+def test_caldav_survives_hub_and_radicale_restarts(stack: dict[str, str]) -> None:
+    owner = _basic(stack["HUB_USER"], stack["HUB_PASSWORD"])
+    _make_room(owner, 1)
+    status, private = _json_call("POST", "/api/sources", owner, {"name": "Restart private"})
+    assert status == 201, private
+    collection = urlparse(private["collection_url"]).path
+    event = f"{collection}restart-1.ics"
+    _put_event(event, owner, _event_bytes("restart-1", "Restart title"))
+    etag, body = _get_event(event, owner)
+    assert b"UID:restart-1" in body
+    assert b"SUMMARY:Restart title" in body
+
+    outcome: dict[str, subprocess.CompletedProcess[str]] = {}
+
+    def restart_hub() -> None:
+        outcome["hub"] = _compose(ROOT, "restart", "hub")
+
+    worker = threading.Thread(target=restart_hub)
+    worker.start()
+    saw_propfind = False
+    saw_event = False
+    deadline = time.monotonic() + 90
+    while worker.is_alive() and time.monotonic() < deadline:
+        try:
+            status, _payload = _propfind(collection, owner)
+            read_status, stored, _ = _https("GET", event, {"Authorization": owner})
+        except (TimeoutError, OSError, http.client.HTTPException):
+            time.sleep(0.2)
+            continue
+        if status == 207:
+            saw_propfind = True
+        if read_status == 200 and stored == body:
+            saw_event = True
+        time.sleep(0.2)
+    worker.join(30)
+    assert outcome["hub"].returncode == 0, outcome["hub"].stderr
+    assert saw_propfind
+    assert saw_event
+    kept_etag, kept = _get_event(event, owner)
+    assert kept == body
+    assert kept_etag == etag
+
+    restarted = _compose(ROOT, "restart", "radicale")
+    assert restarted.returncode == 0, restarted.stderr
+    found = 0
+    deadline = time.monotonic() + 60
+    while time.monotonic() < deadline:
+        try:
+            found, _payload = _propfind(collection, owner)
+        except (TimeoutError, OSError, http.client.HTTPException):
+            found = 0
+        if found == 207:
+            break
+        time.sleep(1)
+    assert found == 207
+    _restored_etag, restored = _get_event(event, owner)
+    assert b"UID:restart-1" in restored
+    assert b"SUMMARY:Restart title" in restored

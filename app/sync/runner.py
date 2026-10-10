@@ -4,6 +4,7 @@ import threading
 import time
 import uuid
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 
@@ -38,6 +39,11 @@ from app.sync.webhook import (
 
 SHUTDOWN_SECONDS = 30
 PROCESS_STOPPED = "The process stopped."
+SAVE_MESSAGE = "The event could not be saved."
+CAPACITY_MESSAGE = "This calendar already has 20000 events."
+MAX_EVENTS = 20000
+_WRITE_WORKERS = 8
+_PARALLEL_AT = 32
 _PULL_KINDS = frozenset({"google", "ics"})
 
 _GUARD = threading.Lock()
@@ -96,7 +102,7 @@ def run_source(
             _log(actor, source_id, run_id, started, "error", exc.stats)
             raise
         except Exception:
-            failed = SyncFailed("The event could not be saved.")
+            failed = SyncFailed(SAVE_MESSAGE)
             _mark_error(engine, source_id, failed.message)
             _log(actor, source_id, run_id, started, "error", failed.stats)
             raise failed from None
@@ -243,7 +249,7 @@ def _background(
                 _mark_error(engine, source_id, message)
         except Exception:
             with _FINAL:
-                message = PROCESS_STOPPED if _STOP.is_set() else "The event could not be saved."
+                message = PROCESS_STOPPED if _STOP.is_set() else SAVE_MESSAGE
                 _mark_error(engine, source_id, message)
         _log(actor, source_id, run_id, started, outcome, stats)
     finally:
@@ -360,35 +366,70 @@ def _apply_google(
     snapshot: google.GoogleSnapshot,
 ) -> RunStats:
     stats = RunStats(seen=len(snapshot.changes))
+    live = _live_count(radicale, collection, stats)
     present: set[str] = set()
+    queued: list[google.GoogleChange] = []
+    blocked = False
     for change in snapshot.changes:
         if _STOP.is_set():
+            _count_google(engine, radicale, source_id, collection, timezone_name, queued, stats)
             raise SyncFailed(PROCESS_STOPPED, stats)
         if change.cancelled:
+            _count_google(engine, radicale, source_id, collection, timezone_name, queued, stats)
+            queued = []
             try:
                 removed = _delete_external(engine, radicale, source_id, collection, change.external_id)
             except SyncFailed as exc:
                 raise SyncFailed(exc.message, stats) from None
             if removed:
                 stats.deleted += 1
+                live -= 1
             continue
+        is_new = _mapping_is_new(engine, source_id, change.external_id)
+        if is_new and live >= MAX_EVENTS:
+            blocked = True
+            break
+        if is_new:
+            live += 1
         present.add(change.external_id)
-        try:
-            wrote = _upsert_google(
+        queued.append(change)
+    _count_google(engine, radicale, source_id, collection, timezone_name, queued, stats)
+    if blocked:
+        raise SyncFailed(CAPACITY_MESSAGE, stats)
+    if _STOP.is_set():
+        raise SyncFailed(PROCESS_STOPPED, stats)
+    if snapshot.full:
+        _delete_absent(engine, radicale, source_id, collection, present, stats)
+    return stats
+
+
+def _count_google(
+    engine: Engine,
+    radicale: RadicaleClient,
+    source_id: str,
+    collection: str,
+    timezone_name: str,
+    changes: list[google.GoogleChange],
+    stats: RunStats,
+) -> None:
+    if not changes:
+        return
+    try:
+        stats.upserted += _write_parallel(
+            changes,
+            lambda change: _upsert_google(
                 engine,
                 radicale,
                 source_id,
                 collection,
                 timezone_name,
                 change,
-            )
-        except SyncFailed as exc:
-            raise SyncFailed(exc.message, stats) from None
-        if wrote:
-            stats.upserted += 1
-    if snapshot.full:
-        _delete_absent(engine, radicale, source_id, collection, present, stats)
-    return stats
+                0,
+                checked=True,
+            )[0],
+        )
+    except SyncFailed as exc:
+        raise SyncFailed(exc.message, stats) from None
 
 
 def _upsert_google(
@@ -398,7 +439,10 @@ def _upsert_google(
     collection: str,
     timezone_name: str,
     change: google.GoogleChange,
-) -> bool:
+    live: int,
+    *,
+    checked: bool = False,
+) -> tuple[bool, bool]:
     with Session(engine) as session:
         mapping = load_mapping(session, source_id, change.external_id)
         found = mapping is not None
@@ -410,6 +454,9 @@ def _upsert_google(
             ical_uid = change.ical_uid
         else:
             ical_uid = new_uid()
+    is_new = not found or deleted is not None
+    if not checked and is_new and live >= MAX_EVENTS:
+        raise SyncFailed(CAPACITY_MESSAGE)
     if change.replace or not found or deleted is not None:
         obj = _object_from_change(change, ical_uid)
     else:
@@ -420,22 +467,22 @@ def _upsert_google(
         try:
             current = radicale.get_event(path)
         except RadicaleError:
-            raise SyncFailed("The event could not be saved.") from None
+            raise SyncFailed(SAVE_MESSAGE) from None
         if current == body:
-            return False
+            return False, False
     try:
-        radicale.put_event(path, body)
+        radicale.put_event(path, body, fresh=is_new)
     except RadicaleError:
-        raise SyncFailed("The event could not be saved.") from None
+        raise SyncFailed(SAVE_MESSAGE) from None
     when = _now()
     with Session(engine) as session, session.begin():
         _remember_mapping(session, source_id, change.external_id, ical_uid, change.etag, when)
-    return True
+    return True, is_new
 
 
 def _object_from_change(change: google.GoogleChange, uid: str) -> CalendarObject:
     if change.master is None:
-        raise SyncFailed("The event could not be saved.")
+        raise SyncFailed(SAVE_MESSAGE)
     chosen: list = []
     for mark in change.master.exdates + change.added_exdates:
         if not any(mark.value == item.value and mark.all_day == item.all_day for item in chosen):
@@ -457,15 +504,15 @@ def _merged_google(
     try:
         current = radicale.get_event(path)
     except RadicaleError:
-        raise SyncFailed("The event could not be saved.") from None
+        raise SyncFailed(SAVE_MESSAGE) from None
     if not current:
         return _object_from_change(change, ical_uid)
     try:
         parsed = parse_vcalendar(current.decode("utf-8"), timezone_name)
     except (UnicodeError, CalendarParseError):
-        raise SyncFailed("The event could not be saved.") from None
+        raise SyncFailed(SAVE_MESSAGE) from None
     if len(parsed) != 1:
-        raise SyncFailed("The event could not be saved.")
+        raise SyncFailed(SAVE_MESSAGE)
     try:
         return merge_partial(
             parsed[0],
@@ -476,7 +523,7 @@ def _merged_google(
             version=change.etag,
         )
     except CalendarParseError:
-        raise SyncFailed("The event could not be saved.") from None
+        raise SyncFailed(SAVE_MESSAGE) from None
 
 
 def _delete_absent(
@@ -522,7 +569,7 @@ def _delete_external(
     try:
         radicale.delete_event(path)
     except RadicaleError:
-        raise SyncFailed("The event could not be saved.") from None
+        raise SyncFailed(SAVE_MESSAGE) from None
     when = _now()
     with Session(engine) as session, session.begin():
         mapping = load_mapping(session, source_id, external_id)
@@ -608,16 +655,26 @@ def _apply_snapshot(
     loaded: FeedSnapshot,
 ) -> RunStats:
     stats = RunStats(seen=len(loaded.objects))
+    live = _live_count(radicale, collection, stats)
     present = {obj.uid for obj in loaded.objects}
+    queued: list[CalendarObject] = []
+    blocked = False
     for obj in loaded.objects:
         if _STOP.is_set():
+            _count_objects(engine, radicale, source_id, collection, queued, stats)
             raise SyncFailed(PROCESS_STOPPED, stats)
-        try:
-            wrote = _upsert_object(engine, radicale, source_id, collection, obj)
-        except SyncFailed as exc:
-            raise SyncFailed(exc.message, stats) from None
-        if wrote:
-            stats.upserted += 1
+        is_new = _mapping_is_new(engine, source_id, obj.uid)
+        if is_new and live >= MAX_EVENTS:
+            blocked = True
+            break
+        if is_new:
+            live += 1
+        queued.append(obj)
+    _count_objects(engine, radicale, source_id, collection, queued, stats)
+    if blocked:
+        raise SyncFailed(CAPACITY_MESSAGE, stats)
+    if _STOP.is_set():
+        raise SyncFailed(PROCESS_STOPPED, stats)
     with Session(engine) as session:
         rows = session.scalars(
             select(EventMapping).where(
@@ -633,14 +690,67 @@ def _apply_snapshot(
         try:
             radicale.delete_event(path)
         except RadicaleError:
-            raise SyncFailed("The event could not be saved.", stats) from None
+            raise SyncFailed(SAVE_MESSAGE, stats) from None
         when = _now()
         with Session(engine) as session, session.begin():
             mapping = load_mapping(session, source_id, external_id)
             if mapping is not None and mapping.deleted_at is None:
                 remember_delete(mapping, when)
         stats.deleted += 1
+        live -= 1
     return stats
+
+
+def _count_objects(
+    engine: Engine,
+    radicale: RadicaleClient,
+    source_id: str,
+    collection: str,
+    objects: list[CalendarObject],
+    stats: RunStats,
+) -> None:
+    if not objects:
+        return
+    try:
+        stats.upserted += _write_parallel(
+            objects,
+            lambda obj: _upsert_object(
+                engine,
+                radicale,
+                source_id,
+                collection,
+                obj,
+                0,
+                checked=True,
+            )[0],
+        )
+    except SyncFailed as exc:
+        raise SyncFailed(exc.message, stats) from None
+
+
+def _write_parallel(items: list, write) -> int:
+    if len(items) < _PARALLEL_AT:
+        upserted = 0
+        for item in items:
+            if _STOP.is_set():
+                raise SyncFailed(PROCESS_STOPPED)
+            if write(item):
+                upserted += 1
+        return upserted
+    upserted = 0
+    workers = min(_WRITE_WORKERS, len(items))
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        futures = [pool.submit(write, item) for item in items]
+        for future in as_completed(futures):
+            if future.result():
+                upserted += 1
+    return upserted
+
+
+def _mapping_is_new(engine: Engine, source_id: str, external_id: str) -> bool:
+    with Session(engine) as session:
+        mapping = load_mapping(session, source_id, external_id)
+        return mapping is None or mapping.deleted_at is not None
 
 
 def _upsert_object(
@@ -649,30 +759,36 @@ def _upsert_object(
     source_id: str,
     collection: str,
     obj: CalendarObject,
-) -> bool:
+    live: int,
+    *,
+    checked: bool = False,
+) -> tuple[bool, bool]:
     with Session(engine) as session:
         mapping = load_mapping(session, source_id, obj.uid)
         found = mapping is not None
         deleted = mapping.deleted_at if mapping is not None else None
         version = mapping.external_version if mapping is not None else None
         ical_uid = mapping.ical_uid if mapping is not None else obj.uid
+    is_new = not found or deleted is not None
+    if not checked and is_new and live >= MAX_EVENTS:
+        raise SyncFailed(CAPACITY_MESSAGE)
     body = build_object(obj).encode("utf-8")
     path = event_path(collection, ical_uid)
     if found and deleted is None and version == obj.version:
         try:
             current = radicale.get_event(path)
         except RadicaleError:
-            raise SyncFailed("The event could not be saved.") from None
+            raise SyncFailed(SAVE_MESSAGE) from None
         if current == body:
-            return False
+            return False, False
     try:
-        radicale.put_event(path, body)
+        radicale.put_event(path, body, fresh=is_new)
     except RadicaleError:
-        raise SyncFailed("The event could not be saved.") from None
+        raise SyncFailed(SAVE_MESSAGE) from None
     when = _now()
     with Session(engine) as session, session.begin():
         _remember_mapping(session, source_id, obj.uid, ical_uid, obj.version, when)
-    return True
+    return True, is_new
 
 
 def _remember_mapping(
@@ -728,7 +844,7 @@ def _apply_delete(
     try:
         radicale.delete_event(path)
     except RadicaleError:
-        raise SyncFailed("The event could not be saved.", RunStats(seen=1)) from None
+        raise SyncFailed(SAVE_MESSAGE, RunStats(seen=1)) from None
     when = _now()
     with Session(engine) as session, session.begin():
         mapping = load_mapping(session, source["id"], command.external_id)
@@ -751,17 +867,29 @@ def _apply_upsert(
             and mapping.external_version == command.revision
         ):
             return RunStats(seen=1)
+        is_new = mapping is None or mapping.deleted_at is not None
         uid = mapping.ical_uid if mapping is not None else new_uid()
+    if is_new:
+        occupied = _live_count(radicale, source["collection_path"], RunStats(seen=1))
+        if occupied >= MAX_EVENTS:
+            raise SyncFailed(CAPACITY_MESSAGE, RunStats(seen=1))
     body = calendar_bytes(command, uid)
     path = event_path(source["collection_path"], uid)
     try:
-        radicale.put_event(path, body)
+        radicale.put_event(path, body, fresh=is_new)
     except RadicaleError:
-        raise SyncFailed("The event could not be saved.", RunStats(seen=1)) from None
+        raise SyncFailed(SAVE_MESSAGE, RunStats(seen=1)) from None
     when = _now()
     with Session(engine) as session, session.begin():
         remember_upsert(session, source["id"], command, uid, when)
     return RunStats(seen=1, upserted=1)
+
+
+def _live_count(radicale: RadicaleClient, collection: str, stats: RunStats) -> int:
+    try:
+        return radicale.count_events(collection)
+    except RadicaleError:
+        raise SyncFailed(SAVE_MESSAGE, stats) from None
 
 
 def _slot(source_id: str) -> threading.Lock:

@@ -14,7 +14,7 @@ from app.db.models import EventMapping, SourceSecret, SyncState
 from app.main import create_app
 from app.radicale.client import RadicaleError
 from app.secrets import decrypt
-from app.sync.runner import RunStats, SlotBusy, run_source
+from app.sync.runner import CAPACITY_MESSAGE, MAX_EVENTS, RunStats, SlotBusy, run_source
 from app.sync.webhook import parse
 
 JSON = {"Content-Type": "application/json"}
@@ -28,6 +28,8 @@ class FakeRadicale:
         self.calls: list[tuple] = []
         self.events: dict[str, bytes] = {}
         self.fail_put = False
+        self.block_put: threading.Event | None = None
+        self.put_started = threading.Event()
 
     def create_collection(self, path: str, display_name: str, color: str) -> None:
         self.calls.append(("create", path, display_name, color))
@@ -38,8 +40,11 @@ class FakeRadicale:
     def delete_collection(self, path: str) -> None:
         self.calls.append(("delete", path))
 
-    def put_event(self, path: str, body: bytes) -> None:
+    def put_event(self, path: str, body: bytes, *, fresh: bool = False) -> None:
         self.calls.append(("put", path, body))
+        if self.block_put is not None:
+            self.put_started.set()
+            self.block_put.wait(5)
         if self.fail_put:
             raise RadicaleError("The calendar could not be saved.")
         self.events[path] = body
@@ -47,6 +52,14 @@ class FakeRadicale:
     def delete_event(self, path: str) -> None:
         self.calls.append(("delete-event", path))
         self.events.pop(path, None)
+
+    def get_event(self, path: str) -> bytes | None:
+        self.calls.append(("get", path))
+        return self.events.get(path)
+
+    def count_events(self, path: str) -> int:
+        prefix = path if path.endswith("/") else f"{path}/"
+        return sum(1 for key in self.events if key.startswith(prefix) and key.lower().endswith(".ics"))
 
 
 def _open(tmp_path: Path, monkeypatch) -> tuple[TestClient, FakeRadicale]:
@@ -576,5 +589,38 @@ def test_a_second_run_does_not_start_while_the_slot_is_held(tmp_path: Path, monk
         assert busy
         assert errors == []
         assert _state(client.app.state.engine, created["id"])["status"] == "ok"
+    finally:
+        _close(client)
+
+
+def test_webhook_stops_at_the_event_limit(tmp_path: Path, monkeypatch) -> None:
+    client, fake = _open(tmp_path, monkeypatch)
+    try:
+        created = _webhook(client, "Full")
+        secret = _plain_secret(client.app.state.engine, created["id"])
+        assert _send(client, created["id"], secret, _payload()).status_code == 200
+        success = _state(client.app.state.engine, created["id"])
+        collection = created["collection_path"]
+        for number in range(MAX_EVENTS - 1):
+            fake.events[f"{collection}pad-{number}.ics"] = b"x"
+        assert fake.count_events(collection) == MAX_EVENTS
+        puts = len(_puts(fake))
+        refused = _send(client, created["id"], secret, _payload(id="extra", summary="Extra"))
+        assert refused.status_code == 500
+        assert refused.json()["detail"] == CAPACITY_MESSAGE
+        assert "Traceback" not in refused.text
+        failed = _state(client.app.state.engine, created["id"])
+        assert failed["status"] == "error"
+        assert failed["last_error_message"] == CAPACITY_MESSAGE
+        assert failed["last_success_at"] == success["last_success_at"]
+        assert len(_puts(fake)) == puts
+        assert [row["external_id"] for row in _mappings(client.app.state.engine, created["id"])] == ["ext-1"]
+
+        updated = _send(client, created["id"], secret, _payload(summary="Changed title"))
+        assert updated.status_code == 200
+        assert _state(client.app.state.engine, created["id"])["status"] == "ok"
+        assert b"Changed title" in next(iter(fake.events.values())) or any(
+            b"Changed title" in body for body in fake.events.values()
+        )
     finally:
         _close(client)

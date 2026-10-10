@@ -16,7 +16,7 @@ from app.main import create_app
 from app.radicale.client import RadicaleError
 from app.secrets import decrypt
 from app.sync.ics import MAX_BYTES, TIMEOUT_SECONDS
-from app.sync.runner import PROCESS_STOPPED, stop_runs, wait_for
+from app.sync.runner import CAPACITY_MESSAGE, MAX_EVENTS, PROCESS_STOPPED, stop_runs, wait_for
 from app.sync.scheduler import due_source_ids
 
 JSON = {"Content-Type": "application/json"}
@@ -31,6 +31,7 @@ class FakeRadicale:
         self.events: dict[str, bytes] = {}
         self.fail_put = False
         self.fail_after: int | None = None
+        self._lock = threading.Lock()
 
     def create_collection(self, path: str, display_name: str, color: str) -> None:
         self.calls.append(("create", path, display_name, color))
@@ -42,12 +43,13 @@ class FakeRadicale:
         self.calls.append(("delete", path))
         self.events = {key: value for key, value in self.events.items() if not key.startswith(path)}
 
-    def put_event(self, path: str, body: bytes) -> None:
-        self.calls.append(("put", path, body))
-        puts = [call for call in self.calls if call[0] == "put"]
-        if self.fail_put or (self.fail_after is not None and len(puts) > self.fail_after):
-            raise RadicaleError("The calendar could not be saved.")
-        self.events[path] = body
+    def put_event(self, path: str, body: bytes, *, fresh: bool = False) -> None:
+        with self._lock:
+            self.calls.append(("put", path, body))
+            puts = [call for call in self.calls if call[0] == "put"]
+            if self.fail_put or (self.fail_after is not None and len(puts) > self.fail_after):
+                raise RadicaleError("The calendar could not be saved.")
+            self.events[path] = body
 
     def delete_event(self, path: str) -> None:
         self.calls.append(("delete-event", path))
@@ -56,6 +58,10 @@ class FakeRadicale:
     def get_event(self, path: str) -> bytes | None:
         self.calls.append(("get", path))
         return self.events.get(path)
+
+    def count_events(self, path: str) -> int:
+        prefix = path if path.endswith("/") else f"{path}/"
+        return sum(1 for key in self.events if key.startswith(prefix) and key.lower().endswith(".ics"))
 
 
 class Feed:
@@ -745,5 +751,54 @@ def test_shutdown_marks_a_blocked_run_and_keeps_events(tmp_path: Path, monkeypat
         assert _state(client.app.state.engine, created["id"])["last_error_message"] == PROCESS_STOPPED
     finally:
         feed.hold.set()
+        _close(client)
+        _close_server(server)
+
+
+def _restamp(lines: list[str], stamp: str) -> list[str]:
+    return [f"DTSTAMP:{stamp}" if line.startswith("DTSTAMP:") else line for line in lines]
+
+
+def test_event_limit_keeps_written_events_and_the_cursor(tmp_path: Path, monkeypatch) -> None:
+    feed = Feed()
+    server, base = _server(feed)
+    client, fake = _open(tmp_path, monkeypatch)
+    try:
+        feed.default = _calendar(*_event("one"))
+        created = _create(client, f"{base}/feed.ics")
+        assert _sync(client, created["id"]).status_code == 202
+        assert wait_for(client.app.state.engine, created["id"]) == "ok"
+        before = _state(client.app.state.engine, created["id"])
+        synced = _mappings(client.app.state.engine, created["id"])[0]["last_synced_at"]
+        collection = created["collection_path"]
+        for number in range(MAX_EVENTS - 2):
+            fake.events[f"{collection}pad-{number}.ics"] = b"x"
+        assert fake.count_events(collection) == MAX_EVENTS - 1
+
+        feed.etag = '"next"'
+        feed.default = _calendar(*_event("one"), *_event("new-a"), *_event("new-b"))
+        assert _sync(client, created["id"]).status_code == 202
+        assert wait_for(client.app.state.engine, created["id"]) == "error"
+        failed = _state(client.app.state.engine, created["id"])
+        assert failed["last_error_message"] == CAPACITY_MESSAGE
+        assert failed["cursor"] == before["cursor"]
+        assert failed["last_success_at"] == before["last_success_at"]
+        assert any(path.endswith("/new-a.ics") for path in fake.events)
+        assert not any(path.endswith("/new-b.ics") for path in fake.events)
+        rows = _mappings(client.app.state.engine, created["id"])
+        assert {row["external_id"] for row in rows} == {"one", "new-a"}
+        kept = next(row for row in rows if row["external_id"] == "one")
+        assert kept["last_synced_at"] == synced
+        assert fake.count_events(collection) == MAX_EVENTS
+
+        feed.etag = '"edited"'
+        feed.default = _calendar(*_restamp(_event("one"), "20261002T080000Z"), *_event("new-a"))
+        assert _sync(client, created["id"]).status_code == 202
+        assert wait_for(client.app.state.engine, created["id"]) == "ok"
+        edited = _state(client.app.state.engine, created["id"])
+        assert edited["cursor"] != before["cursor"]
+        assert b"DTSTAMP:20261002T080000Z" in fake.events[f"{collection}one.ics"]
+        assert fake.count_events(collection) == MAX_EVENTS
+    finally:
         _close(client)
         _close_server(server)

@@ -43,7 +43,7 @@ class FakeRadicale:
         self.calls.append(("delete", path))
         self.events = {key: value for key, value in self.events.items() if not key.startswith(path)}
 
-    def put_event(self, path: str, body: bytes) -> None:
+    def put_event(self, path: str, body: bytes, *, fresh: bool = False) -> None:
         self.calls.append(("put", path, body))
         puts = [call for call in self.calls if call[0] == "put"]
         if self.fail_after is not None and len(puts) > self.fail_after:
@@ -58,6 +58,10 @@ class FakeRadicale:
         self.calls.append(("get", path))
         return self.events.get(path)
 
+    def count_events(self, path: str) -> int:
+        prefix = path if path.endswith("/") else f"{path}/"
+        return sum(1 for key in self.events if key.startswith(prefix) and key.lower().endswith(".ics"))
+
 
 class FakeGoogle:
     def __init__(self) -> None:
@@ -71,6 +75,7 @@ class FakeGoogle:
             "scope": READONLY_SCOPE,
         }
         self.events: list[tuple[int, dict]] = []
+        self.hold: threading.Event | None = None
 
     def push(self, status: int, payload: dict) -> None:
         self.events.append((status, payload))
@@ -114,6 +119,8 @@ class FakeGoogle:
                 if parsed.path == "/token":
                     self._send(fake.token_status, fake.token_payload)
                     return
+                if fake.hold is not None:
+                    fake.hold.wait(5)
                 if not fake.events:
                     self._send(500, {"error": "empty"})
                     return

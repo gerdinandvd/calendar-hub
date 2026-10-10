@@ -359,6 +359,19 @@ def _bundle(
     return TokenBundle(refresh_token=refresh, access_token=access, expiry=expiry)
 
 
+def _timeout() -> float:
+    raw = os.environ.get("HUB_GOOGLE_TIMEOUT", "").strip()
+    if not raw:
+        return TIMEOUT_SECONDS
+    try:
+        value = float(raw)
+    except ValueError:
+        return TIMEOUT_SECONDS
+    if value <= 0:
+        return TIMEOUT_SECONDS
+    return value
+
+
 def _readonly_scope(scope: str | None) -> bool:
     if scope is None or scope.strip() == "":
         return True
@@ -384,7 +397,7 @@ def _list_all(
     items: list = []
     page: str | None = None
     seen: set[str] = set()
-    deadline = time.monotonic() + TIMEOUT_SECONDS
+    deadline = time.monotonic() + _timeout()
     sync_out: str | None = None
     for _page_number in range(MAX_PAGES):
         left = deadline - time.monotonic()

@@ -62,8 +62,8 @@ class RadicaleClient:
     def delete_collection(self, path: str) -> None:
         self._request("DELETE", path, None, ok={200, 202, 204, 404})
 
-    def put_event(self, path: str, body: bytes) -> None:
-        status = self._put(path, body, self._lookup_etag(path))
+    def put_event(self, path: str, body: bytes, *, fresh: bool = False) -> None:
+        status = self._put(path, body, None if fresh else self._lookup_etag(path))
         if status == 412:
             status = self._put(path, body, self._lookup_etag(path))
         if status not in {200, 201, 204}:
@@ -81,6 +81,18 @@ class RadicaleClient:
             logger.error("radicale_error method=GET status=%s", status)
             raise RadicaleError("The calendar could not be saved.")
         return payload
+
+    def count_events(self, path: str) -> int:
+        status, _headers, payload = self._call(
+            "PROPFIND",
+            path,
+            _event_count_body(),
+            depth="1",
+        )
+        if status not in {200, 207}:
+            logger.error("radicale_error method=PROPFIND status=%s", status)
+            raise RadicaleError("The calendar could not be saved.")
+        return _count_ics_hrefs(payload, path)
 
     def _lookup_etag(self, path: str) -> str | None:
         status, headers, _payload = self._call("GET", path, None)
@@ -123,6 +135,7 @@ class RadicaleClient:
         *,
         content_type: str | None = None,
         if_match: str | None = None,
+        depth: str | None = None,
     ) -> tuple[int, dict[str, str], bytes]:
         parsed = urlsplit(self.base_url)
         if parsed.scheme != "http" or not parsed.hostname:
@@ -135,6 +148,8 @@ class RadicaleClient:
             headers["Content-Type"] = content_type or "application/xml; charset=utf-8"
         if if_match:
             headers["If-Match"] = if_match
+        if depth:
+            headers["Depth"] = depth
         connection = http.client.HTTPConnection(parsed.hostname, port, timeout=10)
         try:
             try:
@@ -182,6 +197,33 @@ def _proppatch_body(display_name: str, color: str) -> bytes:
         "</D:prop></D:set></D:propertyupdate>"
     )
     return xml.encode("utf-8")
+
+
+_HREF = re.compile(
+    rb"<(?:[\w.-]+:)?href\b[^>]*>([^<]*)</(?:[\w.-]+:)?href>",
+    re.IGNORECASE,
+)
+
+
+def _event_count_body() -> bytes:
+    xml = (
+        '<?xml version="1.0" encoding="utf-8"?>'
+        '<D:propfind xmlns:D="DAV:"><D:prop><D:getetag/></D:prop></D:propfind>'
+    )
+    return xml.encode("utf-8")
+
+
+def _count_ics_hrefs(payload: bytes, collection: str) -> int:
+    prefix = collection if collection.endswith("/") else f"{collection}/"
+    found: set[str] = set()
+    for raw in _HREF.findall(payload):
+        text = raw.decode("utf-8", errors="replace").strip()
+        path = urlsplit(text).path or text
+        if not path.startswith("/"):
+            path = prefix + path.lstrip("/")
+        if path.startswith(prefix) and path.lower().endswith(".ics"):
+            found.add(path)
+    return len(found)
 
 
 def _propstat_failed(payload: bytes) -> bool:

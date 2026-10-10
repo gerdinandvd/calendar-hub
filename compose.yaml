@@ -34,6 +34,7 @@ services:
       - ./deploy/radicale.config:/config/config:ro
       - ./deploy/radicale-entrypoint.sh:/usr/local/bin/calendar-hub-radicale.sh:ro
       - ./deploy/radicale-users.py:/usr/local/bin/calendar-hub-radicale-users.py:ro
+      - ./deploy/radicale-tune.py:/usr/local/bin/calendar-hub-radicale-tune.py:ro
     entrypoint: ["/bin/sh", "/usr/local/bin/calendar-hub-radicale.sh"]
     networks:
       - internal

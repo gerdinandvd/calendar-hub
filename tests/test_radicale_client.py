@@ -1,5 +1,6 @@
 """The collection client sends CalDAV writes and does not touch event bodies."""
 
+import socket
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -193,6 +194,61 @@ def test_failed_etag_retry_raises_and_logs_status(caplog) -> None:
     finally:
         server.shutdown()
         server.server_close()
+
+
+def test_count_events_counts_ics_children_only() -> None:
+    class Handler(BaseHTTPRequestHandler):
+        def do_PROPFIND(self) -> None:
+            length = int(self.headers.get("Content-Length", "0") or "0")
+            if length:
+                self.rfile.read(length)
+            assert self.headers.get("Depth") == "1"
+            body = (
+                "<?xml version='1.0' encoding='utf-8'?>"
+                "<D:multistatus xmlns:D='DAV:'>"
+                "<D:response><D:href>/owner/one/</D:href></D:response>"
+                "<D:response><D:href>/owner/one/keep.ics</D:href></D:response>"
+                "<D:response><D:href>/owner/one/keep.ics</D:href></D:response>"
+                "<D:response><D:href>http://radicale:5232/owner/one/other.ics</D:href></D:response>"
+                "<D:response><D:href>/owner/one/notes.txt</D:href></D:response>"
+                "<D:response><D:href>/owner/two/skip.ics</D:href></D:response>"
+                "</D:multistatus>"
+            ).encode()
+            self.send_response(207)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, format: str, *args: object) -> None:
+            return
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        port = server.server_address[1]
+        client = RadicaleClient(f"http://127.0.0.1:{port}", "hub-internal", "secret")
+        assert client.count_events("/owner/one/") == 2
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+def test_count_events_logs_no_status_when_the_service_is_down(caplog) -> None:
+    probe = socket.socket()
+    probe.bind(("127.0.0.1", 0))
+    port = probe.getsockname()[1]
+    probe.close()
+    client = RadicaleClient(f"http://127.0.0.1:{port}", "hub-internal", "secret")
+    with caplog.at_level("ERROR", logger="app"):
+        try:
+            client.count_events("/owner/one/")
+            raised = False
+        except RadicaleError:
+            raised = True
+    assert raised
+    assert "radicale_error method=PROPFIND status=none" in caplog.text
+    assert "Traceback" not in caplog.text
 
 
 def test_delete_event_accepts_a_missing_resource() -> None:
