@@ -16,6 +16,7 @@ from app.sync.google import FETCH_MESSAGE, READ_MESSAGE, TIMEOUT_SECONDS, _timeo
 from app.sync.ics import TIMEOUT_MESSAGE
 from app.sync.apply import SAVE_MESSAGE
 from app.sync.runner import PROCESS_STOPPED, stop_runs, wait_for
+from app.ui.text import english
 
 
 class _Store:
@@ -131,7 +132,7 @@ def _assert_visible(client, source_id: str, name: str, message: str, caplog) -> 
     page = client.get("/sync")
     assert page.status_code == 200
     assert name in page.text
-    assert message in page.text
+    assert english(message) in page.text
     assert row["last_error_at"] in page.text
     assert "Traceback" not in page.text
     assert "Traceback" not in caplog.text
@@ -337,7 +338,7 @@ def test_stopped_radicale_on_webhook_keeps_the_event(tmp_path: Path, monkeypatch
                 webhook_tests._payload(id="extra", summary="Extra"),
             )
         assert refused.status_code == 500
-        assert refused.json()["detail"] == SAVE_MESSAGE
+        assert refused.json()["detail"] == english(SAVE_MESSAGE)
         assert "Traceback" not in refused.text
         failed = webhook_tests._state(client.app.state.engine, created["id"])
         assert failed["last_error_message"] == SAVE_MESSAGE
@@ -426,7 +427,7 @@ def test_webhook_process_stop_keeps_the_event(tmp_path: Path, monkeypatch) -> No
         gate.set()
         thread.join(2)
         assert box["response"].status_code == 500
-        assert box["response"].json()["detail"] == PROCESS_STOPPED
+        assert box["response"].json()["detail"] == english(PROCESS_STOPPED)
         for path, body in kept.items():
             assert fake.events[path] == body
         assert webhook_tests._mappings(client.app.state.engine, created["id"])[0]["last_synced_at"] == synced
@@ -542,7 +543,7 @@ def test_failed_etag_retry_on_webhook_keeps_the_event(tmp_path: Path, monkeypatc
                 webhook_tests._payload(id="extra", summary="Extra"),
             )
         assert refused.status_code == 500
-        assert refused.json()["detail"] == SAVE_MESSAGE
+        assert refused.json()["detail"] == english(SAVE_MESSAGE)
         assert "Traceback" not in refused.text
         failed = webhook_tests._state(client.app.state.engine, created["id"])
         assert failed["last_success_at"] == success["last_success_at"]

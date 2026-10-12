@@ -4,7 +4,9 @@ import re
 from pathlib import Path
 
 from fastapi.testclient import TestClient
+from sqlalchemy.orm import Session
 
+from app.db.models import SyncState
 from app.main import create_app
 from app.radicale.client import RadicaleError
 
@@ -323,6 +325,37 @@ def test_dutch_ui_keeps_english_json(tmp_path: Path, monkeypatch) -> None:
         assert body["kind_label"] == "Private"
         assert body["status_label"] == "not applicable"
         assert body["color_name"] == "blue"
+    finally:
+        _close(client)
+
+
+def test_errors_use_codes_and_keep_stored_sentences(tmp_path: Path, monkeypatch) -> None:
+    client, _fake = _open(tmp_path, monkeypatch)
+    try:
+        missing = client.post("/sources?lang=nl", data={"name": "  "}, headers=HX)
+        assert missing.status_code == 200
+        assert missing.text.count("Vul een naam in.") >= 2
+        assert "sentence.enter_name" not in missing.text
+        rejected = client.post("/api/sources", json={"name": "  "}, headers=JSON)
+        assert rejected.status_code == 422
+        assert rejected.json()["detail"] == "Enter a name."
+
+        coded = _create(client, "Coded", kind="ics", ics_url="https://example.com/coded.ics")
+        legacy = _create(client, "Legacy", kind="ics", ics_url="https://example.com/legacy.ics")
+        unknown = _create(client, "Unknown", kind="ics", ics_url="https://example.com/unknown.ics")
+        with Session(client.app.state.engine) as session, session.begin():
+            session.get(SyncState, coded["id"]).last_error_message = "sentence.event_saved"
+            session.get(SyncState, legacy["id"]).last_error_message = "The event could not be saved."
+            session.get(SyncState, unknown["id"]).last_error_message = "A custom operator note."
+        page = client.get("/sync?lang=nl")
+        assert page.status_code == 200
+        assert page.text.count("Het event kon niet worden opgeslagen.") >= 2
+        assert "A custom operator note." in page.text
+        assert "sentence.event_saved" not in page.text
+        rows = {row["name"]: row for row in client.get("/api/sync").json()["sources"]}
+        assert rows["Coded"]["last_error_message"] == "sentence.event_saved"
+        assert rows["Legacy"]["last_error_message"] == "The event could not be saved."
+        assert rows["Unknown"]["last_error_message"] == "A custom operator note."
     finally:
         _close(client)
 

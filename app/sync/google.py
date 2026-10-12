@@ -62,12 +62,12 @@ MAX_BYTES = 20 * 1024 * 1024
 REFRESH_SKEW_SECONDS = 60
 MAX_PAGES = 400
 
-NOT_CONFIGURED = "Google is not configured."
-NOT_CONNECTED = "Google is not connected."
-FETCH_MESSAGE = "The Google calendar could not be fetched."
-TOKEN_MESSAGE = "The Google access token could not be refreshed."
-READ_MESSAGE = "The Google calendar could not be read."
-SCOPE_MESSAGE = "The Google connection can write, so it was not saved."
+NOT_CONFIGURED = "sentence.google_config"
+NOT_CONNECTED = "sentence.google_disconnected"
+FETCH_MESSAGE = "sentence.google_fetch"
+TOKEN_MESSAGE = "sentence.google_token"
+READ_MESSAGE = "sentence.google_read"
+SCOPE_MESSAGE = "sentence.google_write"
 
 _REDIRECTS = {301, 302, 303, 307, 308}
 _UPDATED = re.compile(
@@ -697,7 +697,7 @@ def import_source(
         row = session.get(Source, source_id)
         state = session.get(SyncState, source_id)
         if row is None or state is None:
-            raise RunError("The calendar feed could not be fetched.")
+            raise RunError("sentence.feed_fetch")
         collection = row.collection_path
         calendar_id = row.google_calendar_id or ""
         cursor_raw = state.cursor

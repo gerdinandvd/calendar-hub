@@ -25,62 +25,16 @@ from app.api.sources import (
     start_sync,
     update_source,
 )
-from app.ui.text import translator
+from app.ui.text import present, translator
 
 _GOOGLE_NOTICE = {
-    "state": "The Google connection could not be completed.",
-    "scope": "The Google connection can write, so it was not saved.",
-    "token": "The Google connection could not be completed.",
-    "config": "Google is not configured.",
+    "state": "sentence.google_incomplete",
+    "scope": "sentence.google_write",
+    "token": "sentence.google_incomplete",
+    "config": "sentence.google_config",
 }
-_CONNECT = "Connect. This connection only reads and does not write back."
-_RECONNECT = "Reconnect. This connection only reads and does not write back."
 _LANGS = frozenset({"en", "nl"})
 _LANG_COOKIE = "hub_lang"
-_SENTENCES = {
-    "Enter a name.": "sentence.enter_name",
-    "Enter a valid time zone.": "sentence.timezone",
-    "Enter a poll interval in seconds.": "sentence.poll",
-    "Enter an https URL.": "sentence.https",
-    "Enter an authorization header.": "sentence.authorization",
-    "Enter a calendar id.": "sentence.calendar_id",
-    "That name is already in use.": "sentence.name_used",
-    "You can add at most 20 sources.": "sentence.max_sources",
-    "The calendar could not be saved.": "sentence.calendar_saved",
-    "The calendar could not be deleted.": "sentence.calendar_deleted",
-    "Not found.": "sentence.not_found",
-    "Deletion requires confirmation.": "sentence.confirm_delete",
-    "A sync is already running.": "sentence.sync_running",
-    "Only a webhook source can rotate a secret.": "sentence.rotate_webhook",
-    "Enabled must be 0 or 1.": "sentence.enabled",
-    "Allow http must be 0 or 1.": "sentence.allow_http",
-    "Only a private, webhook, external ICS, or Google source can be created.": "sentence.creatable",
-    "Those fields are only for an external ICS source.": "sentence.fields_ics",
-    "Those fields are only for a Google or external ICS source.": "sentence.fields_google_or_ics",
-    "Those fields are only for a Google source.": "sentence.fields_google",
-    "Sync is not used for this source.": "sentence.sync_unused",
-    "Sync is turned off for this source.": "sentence.sync_off",
-    "The secret key is not configured.": "sentence.secret_key",
-    "Radicale is not reachable.": "sentence.radicale",
-    "The Litestream heartbeat is older than 5 minutes.": "sentence.litestream",
-    "The backup is older than 8 hours.": "sentence.backup",
-    "The Google connection could not be completed.": "sentence.google_incomplete",
-    "The Google connection can write, so it was not saved.": "sentence.google_write",
-    "Google is not configured.": "sentence.google_config",
-    "Google is not connected.": "sentence.google_disconnected",
-    "Connect. This connection only reads and does not write back.": "sentence.connect",
-    "Reconnect. This connection only reads and does not write back.": "sentence.reconnect",
-    "The event could not be saved.": "sentence.event_saved",
-    "This calendar already has 20000 events.": "sentence.capacity",
-    "The process stopped.": "sentence.process_stopped",
-    "The calendar feed could not be fetched.": "sentence.feed_fetch",
-    "The calendar feed did not respond in time.": "sentence.feed_timeout",
-    "The calendar feed is larger than 20 MB.": "sentence.feed_size",
-    "The calendar feed could not be read.": "sentence.feed_read",
-    "The Google calendar could not be fetched.": "sentence.google_fetch",
-    "The Google access token could not be refreshed.": "sentence.google_token",
-    "The Google calendar could not be read.": "sentence.google_read",
-}
 
 router = APIRouter()
 _ADMIN = Path(__file__).resolve().parents[1] / "admin"
@@ -99,7 +53,7 @@ def home(request: Request) -> HTMLResponse:
             "title": translate("brand"),
             "sources": list_sources(engine),
             "caldav": build_caldav_info(engine),
-            "notice": _sentence(translate, notice),
+            "notice": _sentence(request, notice),
         },
     )
 
@@ -140,7 +94,7 @@ async def create_source_page(request: Request, kind: str = "private") -> HTMLRes
             request,
             mode=mode,
             draft=_draft(form.get("name", ""), "Europe/Amsterdam", form=form, kind=chosen),
-            errors=_errors(extra_error, _t(request)),
+            errors=_errors(extra_error, request),
         )
     result = create_source(
         request.app.state.engine,
@@ -157,7 +111,7 @@ async def create_source_page(request: Request, kind: str = "private") -> HTMLRes
             request,
             mode=mode,
             draft=_draft(form.get("name", ""), "Europe/Amsterdam", form=form, kind=chosen),
-            errors=_errors(result, _t(request)),
+            errors=_errors(result, request),
         )
     if chosen == "webhook":
         return _secret_fragment(request, result["id"], result.get("webhook_secret", ""))
@@ -200,7 +154,7 @@ async def update_source_page(source_id: str, request: Request) -> HTMLResponse:
                 form=form,
                 source=found,
             ),
-            errors=_errors(extra_error, _t(request)),
+            errors=_errors(extra_error, request),
             kind=found["kind"],
         )
     result = update_source(
@@ -218,7 +172,7 @@ async def update_source_page(source_id: str, request: Request) -> HTMLResponse:
             request,
             mode="edit",
             draft=_draft(form.get("name", ""), form.get("timezone", ""), source_id, form=form, source=found),
-            errors=_errors(result, _t(request)),
+            errors=_errors(result, request),
             kind=found["kind"],
         )
     return _redirect("/sources")
@@ -282,7 +236,7 @@ def sync_source_page(source_id: str, request: Request) -> HTMLResponse:
         return _render(
             request,
             "sync_panel.html",
-            {"sources": _sync_rows(request), "error": _sentence(_t(request), form_error)},
+            {"sources": _sync_rows(request), "error": _sentence(request, form_error)},
         )
     return _sources_panel(request, form_error)
 
@@ -347,10 +301,9 @@ def htmx_script() -> FileResponse:
 
 def _health_view(request: Request) -> dict[str, object]:
     report = health_report(request.app.state.engine, request.app.state.radicale)
-    translate = _t(request)
     shown = dict(report)
     for key in ("radicale_error", "litestream_error", "kopia_error"):
-        shown[key] = _sentence(translate, str(report.get(key) or ""))
+        shown[key] = _sentence(request, str(report.get(key) or ""))
     return shown
 
 
@@ -384,23 +337,17 @@ def _t(request: Request):
     return translator(_language(request))
 
 
-def _sentence(translate, text: str) -> str:
-    if not text:
-        return text
-    key = _SENTENCES.get(text)
-    if key is None:
-        return text
-    return translate(key)
+def _sentence(request: Request, text: str) -> str:
+    return present(_language(request), text)
 
 
 def _sync_rows(request: Request) -> list[dict]:
-    translate = _t(request)
     rows = []
     for source in list_sync_status(request.app.state.engine):
         row = dict(source)
         message = row.get("last_error_message") or ""
         if message:
-            row["last_error_message"] = _sentence(translate, message)
+            row["last_error_message"] = _sentence(request, message)
         rows.append(row)
     return rows
 
@@ -422,7 +369,7 @@ def _form_page(
     else:
         context["google_connect"] = {
             "href": google_connect["href"],
-            "label": _sentence(translate, google_connect["label"]),
+            "label": _sentence(request, google_connect["label"]),
         }
     return _page(request, "source_page.html", context)
 
@@ -524,7 +471,7 @@ def _panel(request: Request, source_id: str, secret: str, error: str) -> HTMLRes
             "webhook_url": endpoint_url(source_id),
             "webhook_secret": secret,
             "source_id": source_id,
-            "error": _sentence(_t(request), error),
+            "error": _sentence(request, error),
         },
     )
 
@@ -535,7 +482,7 @@ def _sources_panel(request: Request, error: str) -> HTMLResponse:
         "sources_panel.html",
         {
             "sources": list_sources(request.app.state.engine),
-            "error": _sentence(_t(request), error),
+            "error": _sentence(request, error),
         },
     )
 
@@ -598,16 +545,16 @@ def _blank_errors() -> dict[str, str]:
     }
 
 
-def _errors(failure: SourceFailure, translate) -> dict[str, str]:
+def _errors(failure: SourceFailure, request: Request) -> dict[str, str]:
     return {
-        "top": _sentence(translate, failure.detail),
-        "name": _sentence(translate, failure.fields.get("name", "")),
-        "timezone": _sentence(translate, failure.fields.get("timezone", "")),
-        "ics_url": _sentence(translate, failure.fields.get("ics_url", "")),
-        "poll_seconds": _sentence(translate, failure.fields.get("poll_seconds", "")),
-        "ics_authorization_header": _sentence(translate, failure.fields.get("ics_authorization_header", "")),
-        "ics_allow_http": _sentence(translate, failure.fields.get("ics_allow_http", "")),
-        "google_calendar_id": _sentence(translate, failure.fields.get("google_calendar_id", "")),
+        "top": _sentence(request, failure.detail),
+        "name": _sentence(request, failure.fields.get("name", "")),
+        "timezone": _sentence(request, failure.fields.get("timezone", "")),
+        "ics_url": _sentence(request, failure.fields.get("ics_url", "")),
+        "poll_seconds": _sentence(request, failure.fields.get("poll_seconds", "")),
+        "ics_authorization_header": _sentence(request, failure.fields.get("ics_authorization_header", "")),
+        "ics_allow_http": _sentence(request, failure.fields.get("ics_allow_http", "")),
+        "google_calendar_id": _sentence(request, failure.fields.get("google_calendar_id", "")),
     }
 
 
@@ -658,7 +605,7 @@ def _google_connect(found: dict) -> dict | None:
         return None
     return {
         "href": f"/api/oauth/google/start?source_id={found['id']}",
-        "label": _RECONNECT if found.get("google_connected") else _CONNECT,
+        "label": "sentence.reconnect" if found.get("google_connected") else "sentence.connect",
     }
 
 

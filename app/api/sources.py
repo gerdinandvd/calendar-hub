@@ -17,6 +17,7 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session
 
 from app.access import json_error
+from app.ui.text import english
 from app.db.models import EventMapping, Source, SourceSecret, SyncState
 from app.log import log_mutation
 from app.radicale.client import RadicaleClient, RadicaleError
@@ -151,8 +152,8 @@ def create_source(
         if ready.header:
             try:
                 header_cipher = encrypt(ready.header)
-            except SecretKeyError as exc:
-                return _failure(500, str(exc))
+            except SecretKeyError:
+                return _failure(500, "sentence.secret_key")
     google_ready: _GoogleReady | None = None
     if kind == "google":
         prepared = _prepare_google(google_calendar_id, poll_seconds, default_calendar=True)
@@ -165,8 +166,8 @@ def create_source(
         try:
             plaintext = secrets.token_urlsafe(32)
             ciphertext = encrypt(plaintext)
-        except SecretKeyError as exc:
-            return _failure(500, str(exc))
+        except SecretKeyError:
+            return _failure(500, "sentence.secret_key")
     try:
         owner = _owner()
         _host()
@@ -174,16 +175,16 @@ def create_source(
         return _failure(500, str(exc))
     with Session(engine) as session:
         if _count(session) >= MAX_SOURCES:
-            return _failure(422, "You can add at most 20 sources.")
+            return _failure(422, "sentence.max_sources")
         if _name_taken(session, cleaned):
-            return _field("name", "That name is already in use.")
+            return _field("name", "sentence.name_used")
     source_id = str(uuid.uuid4())
     path = f"/{quote(owner, safe='')}/{source_id}/"
     color = KINDS[kind].color
     try:
         radicale.create_collection(path, cleaned, color)
     except RadicaleError:
-        return _failure(500, "The calendar could not be saved.")
+        return _failure(500, "sentence.calendar_saved")
     stamp = _now()
     try:
         with Session(engine) as session, session.begin():
@@ -215,10 +216,10 @@ def create_source(
             payload = _public(row, state, authorization_set=header_cipher is not None)
     except _LimitReached:
         _drop_collection(radicale, path)
-        return _failure(422, "You can add at most 20 sources.")
+        return _failure(422, "sentence.max_sources")
     except IntegrityError:
         _drop_collection(radicale, path)
-        return _field("name", "That name is already in use.")
+        return _field("name", "sentence.name_used")
     except Exception:
         _drop_collection(radicale, path)
         raise
@@ -249,7 +250,7 @@ def update_source(
     with Session(engine) as session:
         row = session.get(Source, source_id)
         if row is None:
-            return _failure(404, "Not found.")
+            return _failure(404, "sentence.not_found")
         current_name = row.name
         current_zone = row.timezone
         current_enabled = row.enabled
@@ -265,11 +266,11 @@ def update_source(
         for value in (ics_url, ics_allow_http, ics_authorization_header)
     ) or clear_ics_authorization
     if ics_change and current_kind != "ics":
-        return _failure(422, "Those fields are only for an external ICS source.")
+        return _failure(422, "sentence.fields_ics")
     if poll_seconds is not None and current_kind not in {"ics", "google"}:
-        return _failure(422, "Those fields are only for a Google or external ICS source.")
+        return _failure(422, "sentence.fields_google_or_ics")
     if google_calendar_id is not None and current_kind != "google":
-        return _failure(422, "Those fields are only for a Google source.")
+        return _failure(422, "sentence.fields_google")
     ready: _IcsReady | None = None
     header_cipher = None
     header_action = "keep"
@@ -289,8 +290,8 @@ def update_source(
             header_action = "replace"
             try:
                 header_cipher = encrypt(ready.header)
-            except SecretKeyError as exc:
-                return _failure(500, str(exc))
+            except SecretKeyError:
+                return _failure(500, "sentence.secret_key")
     google_ready: _GoogleReady | None = None
     if current_kind == "google" and (google_calendar_id is not None or poll_seconds is not None):
         prepared = _prepare_google(
@@ -307,11 +308,11 @@ def update_source(
     if new_name != current_name:
         with Session(engine) as session:
             if _name_taken(session, new_name, ignore_id=source_id):
-                return _field("name", "That name is already in use.")
+                return _field("name", "sentence.name_used")
         try:
             radicale.update_properties(current_path, new_name, current_color)
         except RadicaleError:
-            return _failure(500, "The calendar could not be saved.")
+            return _failure(500, "sentence.calendar_saved")
     try:
         with Session(engine) as session, session.begin():
             row = session.get(Source, source_id)
@@ -350,11 +351,11 @@ def update_source(
     except _Missing:
         if new_name != current_name:
             _restore_name(radicale, current_path, current_name, current_color)
-        return _failure(404, "Not found.")
+        return _failure(404, "sentence.not_found")
     except IntegrityError:
         if new_name != current_name:
             _restore_name(radicale, current_path, current_name, current_color)
-        return _field("name", "That name is already in use.")
+        return _field("name", "sentence.name_used")
     except Exception:
         if new_name != current_name:
             _restore_name(radicale, current_path, current_name, current_color)
@@ -371,16 +372,16 @@ def delete_source(
     confirm: bool,
 ) -> None | SourceFailure:
     if not confirm:
-        return _failure(422, "Deletion requires confirmation.")
+        return _failure(422, "sentence.confirm_delete")
     with Session(engine) as session:
         row = session.get(Source, source_id)
         if row is None:
-            return _failure(404, "Not found.")
+            return _failure(404, "sentence.not_found")
         path = row.collection_path
     try:
         radicale.delete_collection(path)
     except RadicaleError:
-        return _failure(500, "The calendar could not be deleted.")
+        return _failure(500, "sentence.calendar_deleted")
     with Session(engine) as session, session.begin():
         session.execute(delete(EventMapping).where(EventMapping.source_id == source_id))
         session.execute(delete(SourceSecret).where(SourceSecret.source_id == source_id))
@@ -430,7 +431,7 @@ def start_sync(
     try:
         launch_sync(engine, radicale, source_id, actor=actor)
     except SlotBusy:
-        return _failure(409, "A sync is already running.", error="sync_running")
+        return _failure(409, "sentence.sync_running", error="sync_running")
     except SyncRejected as exc:
         return _failure(exc.status, exc.detail, error=exc.error)
     return {"status": "running"}
@@ -452,22 +453,22 @@ def rotate_webhook_secret(
     with Session(engine) as session:
         row = session.get(Source, source_id)
         if row is None:
-            return _failure(404, "Not found.")
+            return _failure(404, "sentence.not_found")
         if row.kind != "webhook":
             return _failure(
                 422,
-                "Only a webhook source can rotate a secret.",
+                "sentence.rotate_webhook",
                 error="rotate_not_supported",
             )
     try:
         plaintext = secrets.token_urlsafe(32)
         ciphertext = encrypt(plaintext)
-    except SecretKeyError as exc:
-        return _failure(500, str(exc))
+    except SecretKeyError:
+        return _failure(500, "sentence.secret_key")
     with Session(engine) as session, session.begin():
         row = session.get(Source, source_id)
         if row is None or row.kind != "webhook":
-            return _failure(404, "Not found.")
+            return _failure(404, "sentence.not_found")
         secret = session.get(SourceSecret, source_id)
         if secret is None:
             secret = _new_secret(source_id, ciphertext)
@@ -549,7 +550,7 @@ def post_source(body: SourceCreate, request: Request) -> dict:
 def read_source(source_id: str, request: Request) -> dict:
     found = get_source(request.app.state.engine, source_id)
     if found is None:
-        return _json(_failure(404, "Not found."))
+        return _json(_failure(404, "sentence.not_found"))
     return found
 
 
@@ -576,7 +577,7 @@ def patch_source(source_id: str, body: SourcePatch, request: Request) -> dict:
 def post_sync(source_id: str, request: Request) -> dict | JSONResponse:
     result = start_sync(request.app.state.engine, request.app.state.radicale, source_id)
     if isinstance(result, SourceFailure):
-        return json_error(result.status, result.error, result.detail)
+        return json_error(result.status, result.error, english(result.detail))
     return JSONResponse(result, status_code=202)
 
 
@@ -618,7 +619,7 @@ class _Missing(Exception):
 
 def _json(result: dict | SourceFailure) -> dict:
     if isinstance(result, SourceFailure):
-        return json_error(result.status, result.error, result.detail)
+        return json_error(result.status, result.error, english(result.detail))
     return result
 
 
@@ -648,7 +649,7 @@ def _field(name: str, message: str) -> SourceFailure:
 def poll_from_form(raw: str) -> int | SourceFailure:
     text = raw.strip()
     if not text.isdigit():
-        return _field("poll_seconds", "Enter a poll interval in seconds.")
+        return _field("poll_seconds", "sentence.poll")
     return _poll_value(int(text))
 
 
@@ -665,23 +666,23 @@ def _validate_new(
     google_calendar_id: str | None = None,
 ) -> SourceFailure | None:
     if kind not in CREATABLE_KINDS:
-        return _failure(422, "Only a private, webhook, external ICS, or Google source can be created.")
+        return _failure(422, "sentence.creatable")
     if kind != "ics" and any(
         value is not None for value in (ics_url, ics_allow_http, ics_authorization_header)
     ):
-        return _failure(422, "Those fields are only for an external ICS source.")
+        return _failure(422, "sentence.fields_ics")
     if kind not in {"ics", "google"} and poll_seconds is not None:
-        return _failure(422, "Those fields are only for a Google or external ICS source.")
+        return _failure(422, "sentence.fields_google_or_ics")
     if kind != "google" and google_calendar_id is not None:
-        return _failure(422, "Those fields are only for a Google source.")
+        return _failure(422, "sentence.fields_google")
     fields: dict[str, str] = {}
     if not name.strip():
-        fields["name"] = "Enter a name."
+        fields["name"] = "sentence.enter_name"
     zone = DEFAULT_TIMEZONE if timezone_name is None else timezone_name.strip()
     if not _timezone_ok(zone):
-        fields["timezone"] = "Enter a valid time zone."
+        fields["timezone"] = "sentence.timezone"
     if enabled is not None and enabled not in (0, 1):
-        return _failure(422, "Enabled must be 0 or 1.", fields)
+        return _failure(422, "sentence.enabled", fields)
     if fields:
         return _failure(422, " ".join(fields.values()), fields)
     return None
@@ -694,11 +695,11 @@ def _validate_change(
 ) -> SourceFailure | None:
     fields: dict[str, str] = {}
     if name is not None and not name.strip():
-        fields["name"] = "Enter a name."
+        fields["name"] = "sentence.enter_name"
     if timezone_name is not None and not _timezone_ok(timezone_name.strip()):
-        fields["timezone"] = "Enter a valid time zone."
+        fields["timezone"] = "sentence.timezone"
     if enabled is not None and enabled not in (0, 1):
-        return _failure(422, "Enabled must be 0 or 1.", fields)
+        return _failure(422, "sentence.enabled", fields)
     if fields:
         return _failure(422, " ".join(fields.values()), fields)
     return None
@@ -790,7 +791,7 @@ def _prepare_ics(
     fields: dict[str, str] = {}
     allow = 0 if allow_http is None else allow_http
     if type(allow) is bool or allow not in (0, 1):
-        fields["ics_allow_http"] = "Allow http must be 0 or 1."
+        fields["ics_allow_http"] = "sentence.allow_http"
         allow = 0
     text = "" if url is None else url.strip()
     url_error = _url_error(text, allow == 1)
@@ -819,7 +820,7 @@ def _prepare_ics(
 
 def _poll_value(value: int) -> int | SourceFailure:
     if type(value) is bool or type(value) is not int or not 1 <= value <= 2147483647:
-        return _field("poll_seconds", "Enter a poll interval in seconds.")
+        return _field("poll_seconds", "sentence.poll")
     return value
 
 
@@ -830,20 +831,20 @@ def _clean_header(value: str | None) -> tuple[str | None, str | None]:
     if text == "":
         return None, None
     if any(char in text for char in "\r\n") or len(text) > 4096:
-        return None, "Enter an authorization header."
+        return None, "sentence.authorization"
     return text, None
 
 
 def _url_error(url: str, allow_http: bool) -> str | None:
     if not url or any(char in url for char in "\r\n\t "):
-        return "Enter an https URL."
+        return "sentence.https"
     parsed = urlsplit(url)
     scheme = parsed.scheme.lower()
     if not parsed.hostname or parsed.username or parsed.password:
-        return "Enter an https URL."
+        return "sentence.https"
     if scheme == "https" or (scheme == "http" and allow_http):
         return None
-    return "Enter an https URL."
+    return "sentence.https"
 
 
 def _store_header(session: Session, source_id: str, ciphertext: str | None) -> None:
@@ -908,9 +909,9 @@ def _prepare_google(
 
 def _calendar_error(value: str) -> str | None:
     if not value or any(char in value for char in "\r\n\t "):
-        return "Enter a calendar id."
+        return "sentence.calendar_id"
     if len(value) > 1024:
-        return "Enter a calendar id."
+        return "sentence.calendar_id"
     return None
 
 

@@ -9,6 +9,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 
 from app.access import json_error
+from app.ui.text import english
 from app.api.sources import get_source, webhook_secret_matches
 from app.secrets import SecretKeyError
 from app.sync.runner import SyncFailed, run_webhook
@@ -71,7 +72,7 @@ async def receive(source_id: str, request: Request) -> dict | JSONResponse:
     try:
         run_webhook(request.app.state.engine, request.app.state.radicale, source, command)
     except SyncFailed as exc:
-        return json_error(500, "internal_error", exc.message)
+        return json_error(500, "internal_error", english(exc.message))
     return {"ok": True}
 
 

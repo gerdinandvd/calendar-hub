@@ -15,8 +15,9 @@ from app.db.models import EventMapping, Source, SourceSecret, SyncState
 from app.main import create_app
 from app.radicale.client import RadicaleError
 from app.secrets import decrypt
-from app.sync.ics import MAX_BYTES, TIMEOUT_SECONDS
-from app.sync.apply import CAPACITY_MESSAGE, MAX_EVENTS
+from app.sync.google import NOT_CONNECTED
+from app.sync.ics import FETCH_MESSAGE, MAX_BYTES, READ_MESSAGE, SIZE_MESSAGE, TIMEOUT_MESSAGE, TIMEOUT_SECONDS
+from app.sync.apply import CAPACITY_MESSAGE, MAX_EVENTS, SAVE_MESSAGE
 from app.sync.runner import PROCESS_STOPPED, stop_runs, wait_for
 from app.sync.scheduler import due_source_ids
 
@@ -388,7 +389,7 @@ def test_not_modified_and_failures_leave_the_collection(tmp_path: Path, monkeypa
         assert _sync(client, created["id"]).status_code == 202
         assert wait_for(client.app.state.engine, created["id"]) == "error"
         failed = _state(client.app.state.engine, created["id"])
-        assert failed["last_error_message"] == "The calendar feed could not be read."
+        assert failed["last_error_message"] == READ_MESSAGE
         assert failed["last_success_at"] == before["last_success_at"]
         assert failed["cursor"] == cursor
         assert len(_puts(fake)) == puts
@@ -399,7 +400,7 @@ def test_not_modified_and_failures_leave_the_collection(tmp_path: Path, monkeypa
         assert _sync(client, created["id"]).status_code == 202
         assert wait_for(client.app.state.engine, created["id"]) == "error"
         large = _state(client.app.state.engine, created["id"])
-        assert large["last_error_message"] == "The calendar feed is larger than 20 MB."
+        assert large["last_error_message"] == SIZE_MESSAGE
         assert large["last_success_at"] == before["last_success_at"]
         assert len(fake.events) == 1
 
@@ -409,7 +410,7 @@ def test_not_modified_and_failures_leave_the_collection(tmp_path: Path, monkeypa
         assert _sync(client, created["id"]).status_code == 202
         assert wait_for(client.app.state.engine, created["id"], timeout=3) == "error"
         timed = _state(client.app.state.engine, created["id"])
-        assert timed["last_error_message"] == "The calendar feed did not respond in time."
+        assert timed["last_error_message"] == TIMEOUT_MESSAGE
         assert timed["last_success_at"] == before["last_success_at"]
         assert len(fake.events) == 1
         feed.hold.set()
@@ -431,7 +432,7 @@ def test_a_failed_write_keeps_what_was_saved_and_the_cursor(tmp_path: Path, monk
         assert _sync(client, created["id"]).status_code == 202
         assert wait_for(client.app.state.engine, created["id"]) == "error"
         failed = _state(client.app.state.engine, created["id"])
-        assert failed["last_error_message"] == "The event could not be saved."
+        assert failed["last_error_message"] == SAVE_MESSAGE
         assert failed["last_success_at"] is None
         assert failed["cursor"] is None
         assert len(fake.events) == 1
@@ -457,9 +458,7 @@ def test_redirect_scheme_is_rejected_and_same_scheme_is_followed(tmp_path: Path,
         created = _create(client, f"{base}/start")
         assert _sync(client, created["id"]).status_code == 202
         assert wait_for(client.app.state.engine, created["id"]) == "error"
-        assert _state(client.app.state.engine, created["id"])["last_error_message"] == (
-            "The calendar feed could not be fetched."
-        )
+        assert _state(client.app.state.engine, created["id"])["last_error_message"] == FETCH_MESSAGE
         assert fake.events == {}
         assert len(feed.requests) == 1
 
@@ -578,9 +577,7 @@ def test_google_start_ends_without_a_write(tmp_path: Path, monkeypatch) -> None:
         started = _sync(client, source_id)
         assert started.status_code == 202
         assert wait_for(client.app.state.engine, source_id) == "error"
-        assert _state(client.app.state.engine, source_id)["last_error_message"] == (
-            "Google is not connected."
-        )
+        assert _state(client.app.state.engine, source_id)["last_error_message"] == NOT_CONNECTED
         assert _puts(fake) == []
         with Session(client.app.state.engine) as session, session.begin():
             session.get(SyncState, source_id).status = "running"

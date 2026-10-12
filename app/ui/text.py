@@ -256,3 +256,51 @@ def translator(lang: str):
         return key
 
     return translate
+
+
+def _legacy_index() -> dict[str, str]:
+    found: dict[str, str] = {}
+    for key, phrase in EN.items():
+        if not key.startswith("sentence."):
+            continue
+        previous = found.get(phrase)
+        if previous is not None:
+            raise RuntimeError(f"duplicate sentence for {previous} and {key}")
+        found[phrase] = key
+    return found
+
+
+_LEGACY = _legacy_index()
+
+
+def _keys(value: str) -> list[str] | None:
+    if not value:
+        return None
+    parts = value.split(" ")
+    if all(part in EN for part in parts):
+        return parts
+    return None
+
+
+def english(value: str) -> str:
+    """Render catalog keys as the English sentence. Other text stays as given."""
+
+    keys = _keys(value)
+    if keys is None:
+        return value
+    return " ".join(EN[key] for key in keys)
+
+
+def present(lang: str, value: str) -> str:
+    """Show a key, several keys, or a stored English sentence in the chosen language."""
+
+    if not value:
+        return value
+    translate = translator(lang)
+    keys = _keys(value)
+    if keys is not None:
+        return " ".join(translate(key) for key in keys)
+    legacy = _LEGACY.get(value)
+    if legacy is not None:
+        return translate(legacy)
+    return value

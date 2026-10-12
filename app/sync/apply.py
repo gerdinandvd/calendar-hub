@@ -15,8 +15,8 @@ from app.db.models import EventMapping
 from app.radicale.client import RadicaleClient, RadicaleError
 
 MAX_EVENTS = 20000
-CAPACITY_MESSAGE = "This calendar already has 20000 events."
-SAVE_MESSAGE = "The event could not be saved."
+CAPACITY_MESSAGE = "sentence.capacity"
+SAVE_MESSAGE = "sentence.event_saved"
 _WRITE_WORKERS = 8
 _PARALLEL_AT = 32
 

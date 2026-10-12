@@ -17,7 +17,7 @@ from app.sync.apply import SAVE_MESSAGE, ImportResult, RunError, RunStats, Stopp
 from app.sync.webhook import Delete, Upsert
 
 SHUTDOWN_SECONDS = 30
-PROCESS_STOPPED = "The process stopped."
+PROCESS_STOPPED = "sentence.process_stopped"
 _PULL_KINDS = frozenset({"google", "ics"})
 
 _GUARD = threading.Lock()
@@ -163,11 +163,11 @@ def _require_pull(engine: Engine, source_id: str) -> None:
         row = session.get(Source, source_id)
         state = session.get(SyncState, source_id)
     if row is None:
-        raise SyncRejected(404, "not_found", "Not found.")
+        raise SyncRejected(404, "not_found", "sentence.not_found")
     if row.kind not in _PULL_KINDS:
-        raise SyncRejected(422, "sync_not_supported", "Sync is not used for this source.")
+        raise SyncRejected(422, "sync_not_supported", "sentence.sync_unused")
     if row.enabled != 1:
-        raise SyncRejected(422, "sync_disabled", "Sync is turned off for this source.")
+        raise SyncRejected(422, "sync_disabled", "sentence.sync_off")
     if state is not None and state.status == "running":
         raise SlotBusy()
 
@@ -245,7 +245,7 @@ def _import_pull(engine: Engine, radicale: RadicaleClient, source_id: str) -> Im
         row = session.get(Source, source_id)
         state = session.get(SyncState, source_id)
         if row is None or state is None:
-            raise RunError("The calendar feed could not be fetched.")
+            raise RunError("sentence.feed_fetch")
         kind = row.kind
     if kind == "google":
         return google.import_source(
@@ -256,7 +256,7 @@ def _import_pull(engine: Engine, radicale: RadicaleClient, source_id: str) -> Im
             on_invalid_cursor=lambda: _clear_cursor(engine, source_id),
         )
     if kind != "ics":
-        raise RunError("Sync is not used for this source.")
+        raise RunError("sentence.sync_unused")
     return ics.import_source(engine, radicale, source_id, stop=_STOP.is_set)
 
 
@@ -280,7 +280,7 @@ def _mark_running(engine: Engine, source_id: str, started: str) -> None:
     with Session(engine) as session, session.begin():
         state = session.get(SyncState, source_id)
         if state is None or state.status == "na":
-            raise SyncFailed("Sync is not used for this source.")
+            raise SyncFailed("sentence.sync_unused")
         state.status = "running"
         state.last_started_at = started
 

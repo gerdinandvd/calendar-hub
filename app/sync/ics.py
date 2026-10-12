@@ -43,10 +43,10 @@ MAX_BYTES = 20 * 1024 * 1024
 TIMEOUT_SECONDS = 30
 MAX_REDIRECTS = 5
 
-FETCH_MESSAGE = "The calendar feed could not be fetched."
-TIMEOUT_MESSAGE = "The calendar feed did not respond in time."
-SIZE_MESSAGE = "The calendar feed is larger than 20 MB."
-READ_MESSAGE = "The calendar feed could not be read."
+FETCH_MESSAGE = "sentence.feed_fetch"
+TIMEOUT_MESSAGE = "sentence.feed_timeout"
+SIZE_MESSAGE = "sentence.feed_size"
+READ_MESSAGE = "sentence.feed_read"
 
 _REDIRECTS = {301, 302, 303, 307, 308}
 

@@ -14,7 +14,8 @@ from app.db.models import EventMapping, SourceSecret, SyncState
 from app.main import create_app
 from app.radicale.client import RadicaleError
 from app.secrets import decrypt
-from app.sync.apply import CAPACITY_MESSAGE, MAX_EVENTS, RunStats
+from app.sync.apply import CAPACITY_MESSAGE, MAX_EVENTS, RunStats, SAVE_MESSAGE
+from app.ui.text import english
 from app.sync.runner import SlotBusy, run_source
 from app.sync.webhook import parse
 
@@ -410,7 +411,7 @@ def test_failed_write_keeps_the_collection(tmp_path: Path, monkeypatch) -> None:
         state = _state(client.app.state.engine, created["id"])
         assert state["status"] == "error"
         assert state["last_success_at"] == success_at
-        assert state["last_error_message"] == "The event could not be saved."
+        assert state["last_error_message"] == SAVE_MESSAGE
         assert state["events_upserted"] == 1
         assert state["events_seen"] == 1
         assert _mappings(client.app.state.engine, created["id"])[0]["last_synced_at"] == synced_at
@@ -524,7 +525,7 @@ def test_sync_page_shows_success_and_error(tmp_path: Path, monkeypatch) -> None:
         assert rows["Ok hook"]["status"] == "ok"
         assert rows["Ok hook"]["last_success_at"]
         assert rows["Bad hook"]["status"] == "error"
-        assert rows["Bad hook"]["last_error_message"] == "The event could not be saved."
+        assert rows["Bad hook"]["last_error_message"] == SAVE_MESSAGE
         assert rows["Bad hook"]["last_success_at"] is None
         assert secret not in status.text
         assert MARKER not in page.text
@@ -608,7 +609,7 @@ def test_webhook_stops_at_the_event_limit(tmp_path: Path, monkeypatch) -> None:
         puts = len(_puts(fake))
         refused = _send(client, created["id"], secret, _payload(id="extra", summary="Extra"))
         assert refused.status_code == 500
-        assert refused.json()["detail"] == CAPACITY_MESSAGE
+        assert refused.json()["detail"] == english(CAPACITY_MESSAGE)
         assert "Traceback" not in refused.text
         failed = _state(client.app.state.engine, created["id"])
         assert failed["status"] == "error"
