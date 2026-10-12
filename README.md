@@ -1,6 +1,6 @@
 # Calendar Hub
 
-Personal hub that puts calendar sources in one place. The stack starts five services. Caddy terminates TLS and asks for basic auth in front of the hub. This build manages private calendars, webhook sources, external ICS feeds, and a read-only Google calendar. Litestream replicates the source database and Kopia snapshots the calendar files. Installation and restore are described in [docs/developers-guide.md](docs/developers-guide.md).
+Personal hub that puts calendar sources in one place. The stack starts five services. Caddy terminates TLS and asks for basic auth in front of the hub. This build manages private calendars, webhook sources, external ICS feeds, and a read-only Google calendar. Litestream replicates the source database and Kopia snapshots the calendar files.
 
 ## Tests without Docker
 

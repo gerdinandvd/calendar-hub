@@ -11,3 +11,6 @@ __pycache__/
 *.sqlite3
 *.sqlite-wal
 *.sqlite-shm
+
+# Design notes stay on this machine.
+docs/
