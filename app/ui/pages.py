@@ -25,6 +25,7 @@ from app.api.sources import (
     start_sync,
     update_source,
 )
+from app.ui.text import translator
 
 _GOOGLE_NOTICE = {
     "state": "The Google connection could not be completed.",
@@ -34,6 +35,52 @@ _GOOGLE_NOTICE = {
 }
 _CONNECT = "Connect. This connection only reads and does not write back."
 _RECONNECT = "Reconnect. This connection only reads and does not write back."
+_LANGS = frozenset({"en", "nl"})
+_LANG_COOKIE = "hub_lang"
+_SENTENCES = {
+    "Enter a name.": "sentence.enter_name",
+    "Enter a valid time zone.": "sentence.timezone",
+    "Enter a poll interval in seconds.": "sentence.poll",
+    "Enter an https URL.": "sentence.https",
+    "Enter an authorization header.": "sentence.authorization",
+    "Enter a calendar id.": "sentence.calendar_id",
+    "That name is already in use.": "sentence.name_used",
+    "You can add at most 20 sources.": "sentence.max_sources",
+    "The calendar could not be saved.": "sentence.calendar_saved",
+    "The calendar could not be deleted.": "sentence.calendar_deleted",
+    "Not found.": "sentence.not_found",
+    "Deletion requires confirmation.": "sentence.confirm_delete",
+    "A sync is already running.": "sentence.sync_running",
+    "Only a webhook source can rotate a secret.": "sentence.rotate_webhook",
+    "Enabled must be 0 or 1.": "sentence.enabled",
+    "Allow http must be 0 or 1.": "sentence.allow_http",
+    "Only a private, webhook, external ICS, or Google source can be created.": "sentence.creatable",
+    "Those fields are only for an external ICS source.": "sentence.fields_ics",
+    "Those fields are only for a Google or external ICS source.": "sentence.fields_google_or_ics",
+    "Those fields are only for a Google source.": "sentence.fields_google",
+    "Sync is not used for this source.": "sentence.sync_unused",
+    "Sync is turned off for this source.": "sentence.sync_off",
+    "The secret key is not configured.": "sentence.secret_key",
+    "Radicale is not reachable.": "sentence.radicale",
+    "The Litestream heartbeat is older than 5 minutes.": "sentence.litestream",
+    "The backup is older than 8 hours.": "sentence.backup",
+    "The Google connection could not be completed.": "sentence.google_incomplete",
+    "The Google connection can write, so it was not saved.": "sentence.google_write",
+    "Google is not configured.": "sentence.google_config",
+    "Google is not connected.": "sentence.google_disconnected",
+    "Connect. This connection only reads and does not write back.": "sentence.connect",
+    "Reconnect. This connection only reads and does not write back.": "sentence.reconnect",
+    "The event could not be saved.": "sentence.event_saved",
+    "This calendar already has 20000 events.": "sentence.capacity",
+    "The process stopped.": "sentence.process_stopped",
+    "The calendar feed could not be fetched.": "sentence.feed_fetch",
+    "The calendar feed did not respond in time.": "sentence.feed_timeout",
+    "The calendar feed is larger than 20 MB.": "sentence.feed_size",
+    "The calendar feed could not be read.": "sentence.feed_read",
+    "The Google calendar could not be fetched.": "sentence.google_fetch",
+    "The Google access token could not be refreshed.": "sentence.google_token",
+    "The Google calendar could not be read.": "sentence.google_read",
+}
 
 router = APIRouter()
 _ADMIN = Path(__file__).resolve().parents[1] / "admin"
@@ -43,14 +90,16 @@ templates = Jinja2Templates(directory=_ADMIN)
 @router.get("/")
 def home(request: Request) -> HTMLResponse:
     engine = request.app.state.engine
+    translate = _t(request)
+    notice = _GOOGLE_NOTICE.get(request.query_params.get("google", ""), "")
     return _page(
         request,
         "home.html",
         {
-            "title": "Calendar hub",
+            "title": translate("brand"),
             "sources": list_sources(engine),
             "caldav": build_caldav_info(engine),
-            "notice": _GOOGLE_NOTICE.get(request.query_params.get("google", ""), ""),
+            "notice": _sentence(translate, notice),
         },
     )
 
@@ -61,7 +110,7 @@ def sources_page(request: Request) -> HTMLResponse:
         request,
         "sources.html",
         {
-            "title": "Sources",
+            "title": _t(request)("nav.sources"),
             "sources": list_sources(request.app.state.engine),
             "error": "",
         },
@@ -91,7 +140,7 @@ async def create_source_page(request: Request, kind: str = "private") -> HTMLRes
             request,
             mode=mode,
             draft=_draft(form.get("name", ""), "Europe/Amsterdam", form=form, kind=chosen),
-            errors=_errors(extra_error),
+            errors=_errors(extra_error, _t(request)),
         )
     result = create_source(
         request.app.state.engine,
@@ -108,7 +157,7 @@ async def create_source_page(request: Request, kind: str = "private") -> HTMLRes
             request,
             mode=mode,
             draft=_draft(form.get("name", ""), "Europe/Amsterdam", form=form, kind=chosen),
-            errors=_errors(result),
+            errors=_errors(result, _t(request)),
         )
     if chosen == "webhook":
         return _secret_fragment(request, result["id"], result.get("webhook_secret", ""))
@@ -127,7 +176,6 @@ def edit_source_page(source_id: str, request: Request) -> HTMLResponse:
         mode="edit",
         draft=_draft(found["name"], found["timezone"], found["id"], source=found),
         errors=_blank_errors(),
-        kind_label=found["kind_label"],
         kind=found["kind"],
         webhook=_webhook_view(found),
         google_connect=_google_connect(found),
@@ -152,8 +200,7 @@ async def update_source_page(source_id: str, request: Request) -> HTMLResponse:
                 form=form,
                 source=found,
             ),
-            errors=_errors(extra_error),
-            kind_label=found["kind_label"],
+            errors=_errors(extra_error, _t(request)),
             kind=found["kind"],
         )
     result = update_source(
@@ -171,8 +218,7 @@ async def update_source_page(source_id: str, request: Request) -> HTMLResponse:
             request,
             mode="edit",
             draft=_draft(form.get("name", ""), form.get("timezone", ""), source_id, form=form, source=found),
-            errors=_errors(result),
-            kind_label=found["kind_label"],
+            errors=_errors(result, _t(request)),
             kind=found["kind"],
         )
     return _redirect("/sources")
@@ -233,10 +279,10 @@ def sync_source_page(source_id: str, request: Request) -> HTMLResponse:
         form_error = result.detail
     view = request.query_params.get("view", "")
     if view == "sync":
-        return templates.TemplateResponse(
+        return _render(
             request,
             "sync_panel.html",
-            {"sources": list_sync_status(request.app.state.engine), "error": form_error},
+            {"sources": _sync_rows(request), "error": _sentence(_t(request), form_error)},
         )
     return _sources_panel(request, form_error)
 
@@ -247,7 +293,7 @@ def calendars_page(request: Request) -> HTMLResponse:
         request,
         "calendars.html",
         {
-            "title": "Calendars",
+            "title": _t(request)("nav.calendars"),
             "calendars": list_calendars(request.app.state.engine),
         },
     )
@@ -258,17 +304,13 @@ def health_page(request: Request) -> HTMLResponse:
     return _page(
         request,
         "health.html",
-        {"title": "Health", "health": _health(request)},
+        {"title": _t(request)("nav.health"), "health": _health_view(request)},
     )
 
 
 @router.get("/health/panel")
 def health_panel(request: Request) -> HTMLResponse:
-    return templates.TemplateResponse(
-        request,
-        "health_panel.html",
-        {"health": _health(request)},
-    )
+    return _render(request, "health_panel.html", {"health": _health_view(request)})
 
 
 @router.get("/sync")
@@ -277,8 +319,8 @@ def sync_page(request: Request) -> HTMLResponse:
         request,
         "sync.html",
         {
-            "title": "Sync",
-            "sources": list_sync_status(request.app.state.engine),
+            "title": _t(request)("nav.sync"),
+            "sources": _sync_rows(request),
             "error": "",
         },
     )
@@ -286,10 +328,10 @@ def sync_page(request: Request) -> HTMLResponse:
 
 @router.get("/sync/panel")
 def sync_panel(request: Request) -> HTMLResponse:
-    return templates.TemplateResponse(
+    return _render(
         request,
         "sync_panel.html",
-        {"sources": list_sync_status(request.app.state.engine), "error": ""},
+        {"sources": _sync_rows(request), "error": ""},
     )
 
 
@@ -303,12 +345,64 @@ def htmx_script() -> FileResponse:
     return FileResponse(_ADMIN / "htmx.min.js", media_type="text/javascript")
 
 
-def _health(request: Request) -> dict[str, object]:
-    return health_report(request.app.state.engine, request.app.state.radicale)
+def _health_view(request: Request) -> dict[str, object]:
+    report = health_report(request.app.state.engine, request.app.state.radicale)
+    translate = _t(request)
+    shown = dict(report)
+    for key in ("radicale_error", "litestream_error", "kopia_error"):
+        shown[key] = _sentence(translate, str(report.get(key) or ""))
+    return shown
 
 
 def _page(request: Request, name: str, context: dict) -> HTMLResponse:
-    return templates.TemplateResponse(request, name, context)
+    return _render(request, name, context)
+
+
+def _render(request: Request, name: str, context: dict) -> HTMLResponse:
+    lang = _language(request)
+    payload = dict(context)
+    payload["t"] = translator(lang)
+    payload["lang"] = lang
+    response = templates.TemplateResponse(request, name, payload)
+    query = request.query_params.get("lang", "")
+    if query in _LANGS:
+        response.set_cookie(_LANG_COOKIE, query, path="/", samesite="lax", httponly=True)
+    return response
+
+
+def _language(request: Request) -> str:
+    query = request.query_params.get("lang", "")
+    if query in _LANGS:
+        return query
+    cookie = request.cookies.get(_LANG_COOKIE, "")
+    if cookie in _LANGS:
+        return cookie
+    return "en"
+
+
+def _t(request: Request):
+    return translator(_language(request))
+
+
+def _sentence(translate, text: str) -> str:
+    if not text:
+        return text
+    key = _SENTENCES.get(text)
+    if key is None:
+        return text
+    return translate(key)
+
+
+def _sync_rows(request: Request) -> list[dict]:
+    translate = _t(request)
+    rows = []
+    for source in list_sync_status(request.app.state.engine):
+        row = dict(source)
+        message = row.get("last_error_message") or ""
+        if message:
+            row["last_error_message"] = _sentence(translate, message)
+        rows.append(row)
+    return rows
 
 
 def _form_page(
@@ -317,13 +411,19 @@ def _form_page(
     mode: str,
     draft: dict,
     errors: dict[str, str],
-    kind_label: str = "Private",
     kind: str = "",
     webhook: dict | None = None,
     google_connect: dict | None = None,
 ) -> HTMLResponse:
-    context = _form_context(mode, draft, errors, kind_label=kind_label, kind=kind, webhook=webhook)
-    context["google_connect"] = google_connect
+    translate = _t(request)
+    context = _form_context(mode, draft, errors, kind=kind, webhook=webhook, translate=translate)
+    if google_connect is None:
+        context["google_connect"] = None
+    else:
+        context["google_connect"] = {
+            "href": google_connect["href"],
+            "label": _sentence(translate, google_connect["label"]),
+        }
     return _page(request, "source_page.html", context)
 
 
@@ -333,14 +433,13 @@ def _form_fragment(
     mode: str,
     draft: dict,
     errors: dict[str, str],
-    kind_label: str = "Private",
     kind: str = "",
 ) -> HTMLResponse:
     name = "webhook_form.html" if mode == "webhook" else "source_form.html"
-    return templates.TemplateResponse(
+    return _render(
         request,
         name,
-        _form_context(mode, draft, errors, kind_label=kind_label, kind=kind),
+        _form_context(mode, draft, errors, kind=kind, translate=_t(request)),
     )
 
 
@@ -349,51 +448,42 @@ def _form_context(
     draft: dict,
     errors: dict[str, str],
     *,
-    kind_label: str = "Private",
     kind: str = "",
     webhook: dict | None = None,
+    translate,
 ) -> dict:
     editing = mode == "edit"
     webhook_mode = mode == "webhook"
     ics_mode = mode == "ics"
     google_mode = mode == "google"
     if webhook_mode:
-        title = "Add a webhook"
-        heading = "Add a webhook"
-        submit_label = "Add a webhook"
+        title = translate("action.add_webhook")
         action = "/sources?kind=webhook"
-        label = "Webhook"
+        kind_code = "webhook"
     elif ics_mode:
-        title = "Add an external ICS"
-        heading = "Add an external ICS"
-        submit_label = "Add an external ICS"
+        title = translate("action.add_ics")
         action = "/sources?kind=ics"
-        label = "External ICS"
+        kind_code = "ics"
     elif google_mode:
-        title = "Add a Google calendar"
-        heading = "Add a Google calendar"
-        submit_label = "Add a Google calendar"
+        title = translate("action.add_google")
         action = "/sources?kind=google"
-        label = "Google"
+        kind_code = "google"
     elif editing:
-        title = "Edit source"
-        heading = "Edit source"
-        submit_label = "Save"
+        title = translate("action.edit_source")
         action = f"/sources/{draft['id']}"
-        label = kind_label
+        kind_code = kind or "private"
     else:
-        title = "Add a source"
-        heading = "Add a source"
-        submit_label = "Add a source"
+        title = translate("action.add_source")
         action = "/sources"
-        label = "Private"
+        kind_code = "private"
+    submit_label = translate("action.save") if editing else title
     return {
         "title": title,
-        "heading": heading,
+        "heading": title,
         "submit_label": submit_label,
         "action": action,
         "mode": mode,
-        "kind_label": label,
+        "kind": kind_code,
         "ics": ics_mode or (editing and kind == "ics"),
         "google": google_mode or (editing and kind == "google"),
         "draft": draft,
@@ -406,7 +496,7 @@ def _form_context(
 
 
 def _secret_fragment(request: Request, source_id: str, secret: str) -> HTMLResponse:
-    response = templates.TemplateResponse(
+    response = _render(
         request,
         "webhook_created.html",
         {
@@ -427,25 +517,25 @@ def _secret_panel(request: Request, source_id: str, secret: str) -> HTMLResponse
 
 
 def _panel(request: Request, source_id: str, secret: str, error: str) -> HTMLResponse:
-    return templates.TemplateResponse(
+    return _render(
         request,
         "webhook_panel.html",
         {
             "webhook_url": endpoint_url(source_id),
             "webhook_secret": secret,
             "source_id": source_id,
-            "error": error,
+            "error": _sentence(_t(request), error),
         },
     )
 
 
 def _sources_panel(request: Request, error: str) -> HTMLResponse:
-    return templates.TemplateResponse(
+    return _render(
         request,
         "sources_panel.html",
         {
             "sources": list_sources(request.app.state.engine),
-            "error": error,
+            "error": _sentence(_t(request), error),
         },
     )
 
@@ -508,16 +598,16 @@ def _blank_errors() -> dict[str, str]:
     }
 
 
-def _errors(failure: SourceFailure) -> dict[str, str]:
+def _errors(failure: SourceFailure, translate) -> dict[str, str]:
     return {
-        "top": failure.detail,
-        "name": failure.fields.get("name", ""),
-        "timezone": failure.fields.get("timezone", ""),
-        "ics_url": failure.fields.get("ics_url", ""),
-        "poll_seconds": failure.fields.get("poll_seconds", ""),
-        "ics_authorization_header": failure.fields.get("ics_authorization_header", ""),
-        "ics_allow_http": failure.fields.get("ics_allow_http", ""),
-        "google_calendar_id": failure.fields.get("google_calendar_id", ""),
+        "top": _sentence(translate, failure.detail),
+        "name": _sentence(translate, failure.fields.get("name", "")),
+        "timezone": _sentence(translate, failure.fields.get("timezone", "")),
+        "ics_url": _sentence(translate, failure.fields.get("ics_url", "")),
+        "poll_seconds": _sentence(translate, failure.fields.get("poll_seconds", "")),
+        "ics_authorization_header": _sentence(translate, failure.fields.get("ics_authorization_header", "")),
+        "ics_allow_http": _sentence(translate, failure.fields.get("ics_allow_http", "")),
+        "google_calendar_id": _sentence(translate, failure.fields.get("google_calendar_id", "")),
     }
 
 

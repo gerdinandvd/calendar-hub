@@ -1,31 +1,31 @@
 <div id="sync-panel" hx-get="/sync/panel" hx-trigger="every 10s" hx-swap="outerHTML">
-  <h1>Sync</h1>
+  <h1>{{ t('nav.sync') }}</h1>
   {% if error %}
   <div id="form-error" tabindex="-1" role="alert">{{ error }}</div>
   {% endif %}
   {% if not sources %}
-  <p>There is no source yet.</p>
+  <p>{{ t('empty.sources') }}</p>
   {% else %}
   <table>
     <thead>
       <tr>
-        <th>Name</th>
-        <th>Kind</th>
-        <th>Status</th>
-        <th>Last success</th>
-        <th>Last error</th>
-        <th>Error</th>
-        <th>Seen</th>
-        <th>Upserted</th>
-        <th>Deleted</th>
+        <th>{{ t('column.name') }}</th>
+        <th>{{ t('column.kind') }}</th>
+        <th>{{ t('column.status') }}</th>
+        <th>{{ t('column.last_success') }}</th>
+        <th>{{ t('column.last_error') }}</th>
+        <th>{{ t('column.error') }}</th>
+        <th>{{ t('column.seen') }}</th>
+        <th>{{ t('column.upserted') }}</th>
+        <th>{{ t('column.deleted') }}</th>
       </tr>
     </thead>
     <tbody>
       {% for source in sources %}
       <tr>
         <td>{{ source.name }}</td>
-        <td>{{ source.kind_label }}</td>
-        <td>{{ source.status_label }}</td>
+        <td>{{ t('kind.' ~ source.kind) }}</td>
+        <td>{{ t('status.' ~ source.status) }}</td>
         <td>{% if source.last_success_at %}{{ source.last_success_at }}{% endif %}</td>
         <td>{% if source.last_error_at %}{{ source.last_error_at }}{% endif %}</td>
         <td>{{ source.last_error_message or "" }}</td>
@@ -35,7 +35,7 @@
         <td>
           {% if source.kind == "google" or source.kind == "ics" %}
           <form method="post" action="/sources/{{ source.id }}/sync?view=sync" hx-post="/sources/{{ source.id }}/sync?view=sync" hx-target="#sync-panel" hx-swap="outerHTML">
-            <button type="submit">Sync now</button>
+            <button type="submit">{{ t('action.sync') }}</button>
           </form>
           {% endif %}
         </td>

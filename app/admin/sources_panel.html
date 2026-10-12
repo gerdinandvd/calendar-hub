@@ -1,23 +1,23 @@
 <div id="sources-panel">
-  <h1>Sources</h1>
+  <h1>{{ t('nav.sources') }}</h1>
   {% if error %}
   <div id="form-error" tabindex="-1" role="alert">{{ error }}</div>
   {% endif %}
   {% if not sources %}
-  <p>There is no source yet.</p>
+  <p>{{ t('empty.sources') }}</p>
   {% endif %}
-  <p><a href="/sources/new">Add a source</a></p>
-  <p><a href="/sources/new?kind=ics">Add an external ICS</a></p>
-  <p><a href="/sources/new?kind=google">Add a Google calendar</a></p>
-  <p><a href="/sources/new?kind=webhook">Add a webhook</a></p>
+  <p><a href="/sources/new">{{ t('action.add_source') }}</a></p>
+  <p><a href="/sources/new?kind=ics">{{ t('action.add_ics') }}</a></p>
+  <p><a href="/sources/new?kind=google">{{ t('action.add_google') }}</a></p>
+  <p><a href="/sources/new?kind=webhook">{{ t('action.add_webhook') }}</a></p>
   {% if sources %}
   <table>
     <thead>
       <tr>
-        <th>Name</th>
-        <th>Kind</th>
-        <th>Status</th>
-        <th>Enabled</th>
+        <th>{{ t('column.name') }}</th>
+        <th>{{ t('column.kind') }}</th>
+        <th>{{ t('column.status') }}</th>
+        <th>{{ t('column.enabled') }}</th>
         <th></th>
       </tr>
     </thead>
@@ -25,37 +25,37 @@
       {% for source in sources %}
       <tr>
         <td>{{ source.name }}</td>
-        <td>{{ source.kind_label }}</td>
-        <td>{{ source.status_label }}</td>
+        <td>{{ t('kind.' ~ source.kind) }}</td>
+        <td>{{ t('status.' ~ source.status) }}</td>
         <td>
-          <span>{{ "On" if source.enabled else "Off" }}</span>
+          <span>{{ t('state.on') if source.enabled else t('state.off') }}</span>
           <form method="post" action="/sources/{{ source.id }}/enabled" hx-post="/sources/{{ source.id }}/enabled" hx-target="#sources-panel" hx-swap="outerHTML">
             {% if source.enabled %}
             <input type="hidden" name="enabled" value="0">
-            <button type="submit">Turn off</button>
+            <button type="submit">{{ t('action.turn_off') }}</button>
             {% else %}
             <input type="hidden" name="enabled" value="1">
-            <button type="submit">Turn on</button>
+            <button type="submit">{{ t('action.turn_on') }}</button>
             {% endif %}
           </form>
         </td>
-        <td><a href="/sources/{{ source.id }}">Edit</a></td>
+        <td><a href="/sources/{{ source.id }}">{{ t('action.edit') }}</a></td>
         <td>
           {% if source.kind == "google" or source.kind == "ics" %}
           <form method="post" action="/sources/{{ source.id }}/sync?view=sources" hx-post="/sources/{{ source.id }}/sync?view=sources" hx-target="#sources-panel" hx-swap="outerHTML">
-            <button type="submit">Sync now</button>
+            <button type="submit">{{ t('action.sync') }}</button>
           </form>
           {% endif %}
         </td>
         <td>
-          <button type="button" onclick="document.getElementById('delete-{{ source.id }}').showModal()">Delete</button>
+          <button type="button" onclick="document.getElementById('delete-{{ source.id }}').showModal()">{{ t('action.delete') }}</button>
           <dialog id="delete-{{ source.id }}" aria-labelledby="delete-title-{{ source.id }}">
-            <h2 id="delete-title-{{ source.id }}">Delete source</h2>
-            <p>Deleting this source also deletes its calendar.</p>
+            <h2 id="delete-title-{{ source.id }}">{{ t('dialog.delete_source') }}</h2>
+            <p>{{ t('dialog.delete_body') }}</p>
             <form method="post" action="/sources/{{ source.id }}/delete" hx-post="/sources/{{ source.id }}/delete" hx-target="#sources-panel" hx-swap="outerHTML">
               <input type="hidden" name="confirm" value="true">
-              <button type="button" onclick="this.closest('dialog').close()">Cancel</button>
-              <button type="submit">Delete</button>
+              <button type="button" onclick="this.closest('dialog').close()">{{ t('action.cancel') }}</button>
+              <button type="submit">{{ t('action.delete') }}</button>
             </form>
           </dialog>
         </td>

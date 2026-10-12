@@ -78,7 +78,7 @@ def test_sync_start_answers_within_a_second(tmp_path: Path, monkeypatch) -> None
         assert time.perf_counter() - started < 1
         assert panel.status_code == 200
         assert "A sync is already running." in panel.text
-        assert "busy" in panel.text
+        assert ">running<" in panel.text
         assert len(feed.requests) == 1
 
         private_sync = ics_tests._sync(client, private.json()["id"])

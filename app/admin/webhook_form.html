@@ -3,8 +3,8 @@
   <div id="form-error" tabindex="-1" role="alert">{{ errors.top }}</div>
   {% endif %}
   <form method="post" action="{{ action }}" hx-post="{{ action }}" hx-target="#source-form" hx-swap="outerHTML">
-    <h2>Webhook</h2>
-    <label for="name">Name</label>
+    <h2>{{ t('kind.' ~ kind) }}</h2>
+    <label for="name">{{ t('field.name') }}</label>
     <input id="name" name="name" value="{{ draft.name }}" {% if errors.name %}aria-invalid="true" aria-describedby="name-error"{% endif %}>
     {% if errors.name %}
     <p id="name-error">{{ errors.name }}</p>

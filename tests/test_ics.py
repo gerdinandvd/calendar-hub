@@ -529,7 +529,7 @@ def test_manual_sync_answers_and_the_button(tmp_path: Path, monkeypatch) -> None
         panel = client.post(f"/sources/{created['id']}/sync?view=sync", headers=HX)
         assert panel.status_code == 200
         assert "A sync is already running." in panel.text
-        assert "busy" in panel.text
+        assert ">running<" in panel.text
         assert len(feed.requests) == 1
 
         private_sync = _sync(client, private.json()["id"])

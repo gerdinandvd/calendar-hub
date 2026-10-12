@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="{{ lang }}">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -9,14 +9,18 @@
 </head>
 <body hx-on:htmx:after-settle="var node = document.getElementById('form-error'); if (node) node.focus();">
   <header>
-    <p class="brand">Calendar hub</p>
+    <p class="brand">{{ t('brand') }}</p>
     <nav>
-      <a href="/">Home</a>
-      <a href="/sources">Sources</a>
-      <a href="/calendars">Calendars</a>
-      <a href="/sync">Sync</a>
-      <a href="/health">Health</a>
+      <a href="/">{{ t('nav.home') }}</a>
+      <a href="/sources">{{ t('nav.sources') }}</a>
+      <a href="/calendars">{{ t('nav.calendars') }}</a>
+      <a href="/sync">{{ t('nav.sync') }}</a>
+      <a href="/health">{{ t('nav.health') }}</a>
     </nav>
+    <p class="lang">
+      <a href="{{ request.url.include_query_params(lang='en').path }}?{{ request.url.include_query_params(lang='en').query }}">{{ t('lang.en') }}</a>
+      <a href="{{ request.url.include_query_params(lang='nl').path }}?{{ request.url.include_query_params(lang='nl').query }}">{{ t('lang.nl') }}</a>
+    </p>
   </header>
   <main>
     {% block main %}{% endblock %}

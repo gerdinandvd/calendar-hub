@@ -3,50 +3,50 @@
   <div id="form-error" tabindex="-1" role="alert">{{ errors.top }}</div>
   {% endif %}
   <form method="post" action="{{ action }}" hx-post="{{ action }}" hx-target="#source-form" hx-swap="outerHTML">
-    <h2>{{ kind_label }}</h2>
-    <label for="name">Name</label>
+    <h2>{{ t('kind.' ~ kind) }}</h2>
+    <label for="name">{{ t('field.name') }}</label>
     <input id="name" name="name" value="{{ draft.name }}" {% if errors.name %}aria-invalid="true" aria-describedby="name-error"{% endif %}>
     {% if errors.name %}
     <p id="name-error">{{ errors.name }}</p>
     {% endif %}
     {% if mode == "edit" %}
-    <label for="timezone">Time zone</label>
+    <label for="timezone">{{ t('field.timezone') }}</label>
     <input id="timezone" name="timezone" value="{{ draft.timezone }}" {% if errors.timezone %}aria-invalid="true" aria-describedby="timezone-error"{% endif %}>
     {% if errors.timezone %}
     <p id="timezone-error">{{ errors.timezone }}</p>
     {% endif %}
     {% endif %}
     {% if ics %}
-    <label for="ics_url">URL</label>
+    <label for="ics_url">{{ t('field.url') }}</label>
     <input id="ics_url" name="ics_url" value="{{ draft.ics_url }}" {% if errors.ics_url %}aria-invalid="true" aria-describedby="ics_url-error"{% endif %}>
     {% if errors.ics_url %}
     <p id="ics_url-error">{{ errors.ics_url }}</p>
     {% endif %}
-    <label for="ics_authorization_header">Authorization header</label>
+    <label for="ics_authorization_header">{{ t('field.authorization') }}</label>
     <input id="ics_authorization_header" name="ics_authorization_header" type="password" value="" autocomplete="off" {% if errors.ics_authorization_header %}aria-invalid="true" aria-describedby="ics_authorization_header-error"{% endif %}>
     {% if errors.ics_authorization_header %}
     <p id="ics_authorization_header-error">{{ errors.ics_authorization_header }}</p>
     {% endif %}
     {% if draft.ics_authorization_set %}
-    <p>An authorization header is set.</p>
-    <label for="clear_ics_authorization">Remove the authorization header</label>
+    <p>{{ t('field.authorization_set') }}</p>
+    <label for="clear_ics_authorization">{{ t('field.clear_authorization') }}</label>
     <input id="clear_ics_authorization" name="clear_ics_authorization" type="checkbox" value="1">
     {% endif %}
-    <label for="poll_seconds">Poll interval in seconds</label>
+    <label for="poll_seconds">{{ t('field.poll') }}</label>
     <input id="poll_seconds" name="poll_seconds" value="{{ draft.poll_seconds }}" {% if errors.poll_seconds %}aria-invalid="true" aria-describedby="poll_seconds-error"{% endif %}>
     {% if errors.poll_seconds %}
     <p id="poll_seconds-error">{{ errors.poll_seconds }}</p>
     {% endif %}
-    <label for="ics_allow_http">Allow http</label>
+    <label for="ics_allow_http">{{ t('field.allow_http') }}</label>
     <input id="ics_allow_http" name="ics_allow_http" type="checkbox" value="1" {% if draft.ics_allow_http %}checked{% endif %}>
     {% endif %}
     {% if google %}
-    <label for="google_calendar_id">Calendar id</label>
+    <label for="google_calendar_id">{{ t('field.calendar_id') }}</label>
     <input id="google_calendar_id" name="google_calendar_id" value="{{ draft.google_calendar_id }}" {% if errors.google_calendar_id %}aria-invalid="true" aria-describedby="google_calendar_id-error"{% endif %}>
     {% if errors.google_calendar_id %}
     <p id="google_calendar_id-error">{{ errors.google_calendar_id }}</p>
     {% endif %}
-    <label for="poll_seconds">Poll interval in seconds</label>
+    <label for="poll_seconds">{{ t('field.poll') }}</label>
     <input id="poll_seconds" name="poll_seconds" value="{{ draft.poll_seconds }}" {% if errors.poll_seconds %}aria-invalid="true" aria-describedby="poll_seconds-error"{% endif %}>
     {% if errors.poll_seconds %}
     <p id="poll_seconds-error">{{ errors.poll_seconds }}</p>

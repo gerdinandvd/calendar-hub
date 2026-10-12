@@ -205,12 +205,18 @@ def test_admin_pages_and_field_errors(tmp_path: Path, monkeypatch) -> None:
         assert INTERNAL_USER not in home.text
         assert "Sync now" not in home.text
         assert 'hx-on:htmx:after-settle="var node = document.getElementById(\'form-error\')' in home.text
+        assert 'href="/?lang=en"' in home.text
+        assert 'href="/?lang=nl"' in home.text
+        assert 'href="http' not in home.text
 
         blocked = client.post("/sources", data={"name": "Home"})
         assert blocked.status_code == 400
         assert fake.calls == []
 
         form = client.get("/sources/new")
+        assert 'href="/sources/new?lang=en"' in form.text
+        hook_form = client.get("/sources/new?kind=webhook")
+        assert 'href="/sources/new?kind=webhook&amp;lang=nl"' in hook_form.text
         assert 'for="name"' in form.text
         assert ">Name<" in form.text
         assert ">Private<" in form.text
@@ -288,6 +294,35 @@ def test_admin_pages_and_field_errors(tmp_path: Path, monkeypatch) -> None:
         assert info["collections"][0]["color_name"] == "blue"
         assert "password" not in info
         assert INTERNAL_USER not in str(info)
+    finally:
+        _close(client)
+
+
+def test_dutch_ui_keeps_english_json(tmp_path: Path, monkeypatch) -> None:
+    client, _fake = _open(tmp_path, monkeypatch)
+    try:
+        created = _create(client, "Home")
+        page = client.get("/sources?lang=nl")
+        assert page.status_code == 200
+        assert page.cookies.get("hub_lang") == "nl"
+        assert 'lang="nl"' in page.text
+        assert "Privé" in page.text
+        assert "niet van toepassing" in page.text
+        assert "Bronnen" in page.text
+        fragment = client.post(
+            f"/sources/{created['id']}/enabled",
+            data={"enabled": "0"},
+            headers=HX,
+        )
+        assert fragment.status_code == 200
+        assert "lang" not in fragment.request.url.query.decode()
+        assert "Privé" in fragment.text
+        assert "niet van toepassing" in fragment.text
+        assert "Aanzetten" in fragment.text
+        body = client.get("/api/sources").json()["sources"][0]
+        assert body["kind_label"] == "Private"
+        assert body["status_label"] == "not applicable"
+        assert body["color_name"] == "blue"
     finally:
         _close(client)
 

@@ -1,34 +1,34 @@
 <div id="health-panel" hx-get="/health/panel" hx-trigger="every 10s" hx-swap="outerHTML">
-  <h1>Health</h1>
+  <h1>{{ t('nav.health') }}</h1>
   <table>
     <tbody>
       <tr>
-        <th scope="row">SQLite</th>
-        <td>{{ health.sqlite }}</td>
+        <th scope="row">{{ t('health.sqlite') }}</th>
+        <td>{{ t('probe.' ~ health.sqlite) }}</td>
       </tr>
       <tr>
-        <th scope="row">Radicale</th>
+        <th scope="row">{{ t('health.radicale') }}</th>
         <td>
-          {{ health.radicale }}
+          {{ t('probe.' ~ health.radicale) }}
           {% if health.radicale_error %}<p>{{ health.radicale_error }}</p>{% endif %}
         </td>
       </tr>
       <tr>
-        <th scope="row">Litestream heartbeat</th>
+        <th scope="row">{{ t('health.litestream') }}</th>
         <td>
           {% if health.litestream_at %}{{ health.litestream_at }}{% endif %}
           {% if health.litestream_error %}<p>{{ health.litestream_error }}</p>{% endif %}
         </td>
       </tr>
       <tr>
-        <th scope="row">Backup heartbeat</th>
+        <th scope="row">{{ t('health.backup') }}</th>
         <td>
           {% if health.kopia_at %}{{ health.kopia_at }}{% endif %}
           {% if health.kopia_error %}<p>{{ health.kopia_error }}</p>{% endif %}
         </td>
       </tr>
       <tr>
-        <th scope="row">Free disk</th>
+        <th scope="row">{{ t('health.disk') }}</th>
         <td>{{ health.disk_free_bytes }}</td>
       </tr>
     </tbody>

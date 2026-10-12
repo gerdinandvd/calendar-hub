@@ -1,17 +1,17 @@
 {% extends "base.html" %}
 {% block main %}
-<h1>Calendar hub</h1>
+<h1>{{ t('brand') }}</h1>
 {% if notice %}
 <div id="form-error" role="alert">{{ notice }}</div>
 {% endif %}
-<p>This hub keeps sources and sync in one place.</p>
-<p><a href="/sources">Sources</a></p>
-<p><a href="/calendars">Calendars</a></p>
-<p><a href="/sync">Sync</a></p>
-<p><a href="/health">Health</a></p>
+<p>{{ t('home.intro') }}</p>
+<p><a href="/sources">{{ t('nav.sources') }}</a></p>
+<p><a href="/calendars">{{ t('nav.calendars') }}</a></p>
+<p><a href="/sync">{{ t('nav.sync') }}</a></p>
+<p><a href="/health">{{ t('nav.health') }}</a></p>
 {% if not sources %}
-<p>There is no source yet.</p>
+<p>{{ t('empty.sources') }}</p>
 {% endif %}
-<p><a href="/sources/new">Add a source</a></p>
+<p><a href="/sources/new">{{ t('action.add_source') }}</a></p>
 {% include "caldav.html" %}
 {% endblock %}
