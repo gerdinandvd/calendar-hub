@@ -445,7 +445,7 @@ def test_secret_is_shown_once_and_rotation_replaces_it(tmp_path: Path, monkeypat
         edit = client.get(f"/sources/{source_id}")
         assert "Secret is set." in edit.text
         assert shown not in edit.text
-        assert "Rotate secret" in edit.text
+        assert "Replace secret" in edit.text
         assert f"https://localhost:8443/api/webhooks/{source_id}" in edit.text
         assert "Time zone" in edit.text
         before = client.get(f"/api/sources/{source_id}").json()["collection_url"]
@@ -455,6 +455,7 @@ def test_secret_is_shown_once_and_rotation_replaces_it(tmp_path: Path, monkeypat
         assert rotated.headers["cache-control"] == "no-store"
         new_secret = re.search(r'id="webhook-secret-value"[^>]*>([^<]+)', rotated.text).group(1)
         assert new_secret != shown
+        assert "The previous secret no longer works." in rotated.text
         assert client.get(f"/sources/{source_id}").text.find(new_secret) == -1
         assert client.get(f"/api/sources/{source_id}").json()["collection_url"] == before
 
@@ -508,13 +509,13 @@ def test_sync_page_shows_success_and_error(tmp_path: Path, monkeypatch) -> None:
         assert page.status_code == 200
         assert "succeeded" in page.text
         assert "The event could not be saved." in page.text
-        assert "not applicable" in page.text
+        assert "no sync" in page.text
         assert "Sync now" not in page.text
         assert 'hx-trigger="every 10s"' in page.text
         panel = client.get("/sync/panel")
         assert "succeeded" in panel.text
         assert "The event could not be saved." in panel.text
-        assert "not applicable" in panel.text
+        assert "no sync" in panel.text
 
         status = client.get("/api/sync")
         assert status.status_code == 200

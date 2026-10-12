@@ -81,7 +81,7 @@ def start_google(source_id: str, request: Request) -> Response:
             redirect_uri=redirect_uri,
         )
     except google.GoogleError:
-        return RedirectResponse("/?google=config", status_code=302)
+        return RedirectResponse(f"/sources/{source_id}?google=config", status_code=302)
     return RedirectResponse(url, status_code=302)
 
 
@@ -93,24 +93,28 @@ def google_callback(
     error: str | None = None,
 ) -> RedirectResponse:
     source_id = _states(request).consume(state)
-    if source_id is None or error or not code:
+    if source_id is None:
         return RedirectResponse("/?google=state", status_code=302)
+    if error or not code:
+        return RedirectResponse(f"/sources/{source_id}?google=state", status_code=302)
     engine = request.app.state.engine
     with Session(engine) as session:
         row = session.get(Source, source_id)
         kind = None if row is None else row.kind
-    if kind != "google":
+    if kind is None:
         return RedirectResponse("/?google=state", status_code=302)
+    if kind != "google":
+        return RedirectResponse(f"/sources/{source_id}?google=state", status_code=302)
     try:
         bundle = google.exchange_code(code=code, redirect_uri=_callback_uri())
     except google.ScopeRejected:
-        return RedirectResponse("/?google=scope", status_code=302)
+        return RedirectResponse(f"/sources/{source_id}?google=scope", status_code=302)
     except google.GoogleError:
-        return RedirectResponse("/?google=token", status_code=302)
+        return RedirectResponse(f"/sources/{source_id}?google=token", status_code=302)
     try:
         store_tokens(engine, source_id, bundle)
     except SecretKeyError:
-        return RedirectResponse("/?google=token", status_code=302)
+        return RedirectResponse(f"/sources/{source_id}?google=token", status_code=302)
     log_mutation(actor="owner", source_id=source_id, message="connected google source")
     return RedirectResponse(f"/sources/{source_id}", status_code=302)
 

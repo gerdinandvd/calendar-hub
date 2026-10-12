@@ -8,6 +8,9 @@
   {% if webhook_secret %}
   <p id="webhook-secret-value" class="secret">{{ webhook_secret }}</p>
   <p>{{ t('webhook.once') }}</p>
+  {% if replaced %}
+  <p>{{ t('sentence.secret_replaced') }}</p>
+  {% endif %}
   {% else %}
   <p>{{ t('webhook.set') }}</p>
   {% endif %}

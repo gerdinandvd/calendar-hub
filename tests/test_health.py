@@ -138,14 +138,14 @@ def _stamp(moment: datetime) -> str:
 
 
 def _disk_bytes(html: str) -> int:
-    found = re.search(r"Free disk</th>\s*<td>[^<]*\((\d+)\)", html)
+    found = re.search(r"Free disk space</th>\s*<td>[^<]*\((\d+)\)", html)
     assert found is not None
     return int(found.group(1))
 
 
 def _same_panel(panel: str, page: str) -> None:
     def diskless(html: str) -> str:
-        return re.sub(r"(Free disk</th>\s*<td>[^<]*\()\d+(\))", r"\1\2", html)
+        return re.sub(r"(Free disk space</th>\s*<td>[^<]*\()\d+(\))", r"\1\2", html)
 
     assert diskless(panel.strip()) in diskless(page)
 
@@ -205,19 +205,19 @@ def test_health_page_shows_fresh_and_stale_backups(tmp_path: Path, monkeypatch) 
         assert 'hx-trigger="every 10s"' in panel.text
         assert "SQLite" in page.text
         assert "Radicale" in page.text
-        assert "Litestream heartbeat" in page.text
-        assert "Backup heartbeat" in page.text
-        assert "Free disk" in page.text
+        assert "Litestream last seen" in page.text
+        assert "Backup last seen" in page.text
+        assert "Free disk space" in page.text
         reported = client.get("/api/health").json()["disk_free_bytes"]
         assert reported > 0
         assert _disk_bytes(page.text) > 0
         assert _disk_bytes(panel.text) > 0
         assert re.search(
-            r"Free disk</th>\s*<td>\d+(?:\.\d)? (?:B|KB|MB|GB|TB) \(\d+\)",
+            r"Free disk space</th>\s*<td>\d+(?:\.\d)? (?:B|KB|MB|GB|TB) \(\d+\)",
             page.text,
         )
         assert re.search(
-            r"Free disk</th>\s*<td>\d+(?:\.\d)? (?:B|KB|MB|GB|TB) \(\d+\)",
+            r"Free disk space</th>\s*<td>\d+(?:\.\d)? (?:B|KB|MB|GB|TB) \(\d+\)",
             panel.text,
         )
         assert RADICALE_ERROR in page.text

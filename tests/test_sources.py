@@ -204,10 +204,10 @@ def test_admin_pages_and_field_errors(tmp_path: Path, monkeypatch) -> None:
         assert home.text.count('href="/sync"') == 1
         assert home.text.count('href="/health"') == 1
         assert 'href="/" aria-current="page"' in home.text
-        assert "The password is the password of HUB_USER." in home.text
-        assert "Android uses DAVx⁵ to reach the calendar app on the device." in home.text
-        assert "iOS uses the calendar app." in home.text
-        assert "Thunderbird connects directly to CalDAV." in home.text
+        assert "Use the password of the hub user." in home.text
+        assert "On Android, add this account in DAVx⁵." in home.text
+        assert "On iOS, add a CalDAV account in the calendar app." in home.text
+        assert "In Thunderbird, add a calendar on the network and choose CalDAV." in home.text
         assert SECRET_PASSWORD not in home.text
         assert INTERNAL_USER not in home.text
         assert "Sync now" not in home.text
@@ -226,7 +226,7 @@ def test_admin_pages_and_field_errors(tmp_path: Path, monkeypatch) -> None:
         assert 'href="/sources/new?kind=webhook&amp;lang=nl"' in hook_form.text
         assert 'for="name"' in form.text
         assert ">Name<" in form.text
-        assert ">Private<" in form.text
+        assert ">In this hub<" in form.text
         assert "Time zone" not in form.text
         _assert_labels(form.text)
 
@@ -241,15 +241,19 @@ def test_admin_pages_and_field_errors(tmp_path: Path, monkeypatch) -> None:
 
         created = client.post("/sources", data={"name": "Home"}, headers=HX)
         assert created.status_code == 200
-        assert created.headers["hx-redirect"] == "/sources"
+        assert created.headers["hx-redirect"].startswith("/sources/")
+        workplace = client.get(created.headers["hx-redirect"])
+        assert "Add this URL in your calendar app." in workplace.text
+        assert "no sync" in workplace.text
+        assert "This calendar lives in the hub. Nothing is fetched." in workplace.text
         page = client.get("/sources")
         assert "Home" in page.text
         assert 'href="/sources" aria-current="page"' in page.text
-        assert "Private" in page.text
-        assert "not applicable" in page.text
+        assert "In this hub" in page.text
+        assert "no sync" in page.text
         assert "Turn off" in page.text
         assert "Edit" in page.text
-        assert "Deleting this source also deletes its calendar." in page.text
+        assert "This removes the calendar from this hub, including its events." in page.text
         assert "Enter a name." not in page.text
         assert "Sync now" not in page.text
         assert page.text.count('name="confirm" value="true"') == 1
@@ -278,7 +282,8 @@ def test_admin_pages_and_field_errors(tmp_path: Path, monkeypatch) -> None:
             data={"name": "Home", "timezone": "Europe/Amsterdam"},
             headers=HX,
         )
-        assert saved.headers["hx-redirect"] == "/sources"
+        assert saved.headers["hx-retarget"] == "main"
+        assert "Saved." in saved.text
 
         off = client.post(
             f"/sources/{source_id}/enabled",
@@ -292,7 +297,7 @@ def test_admin_pages_and_field_errors(tmp_path: Path, monkeypatch) -> None:
         calendars = client.get("/calendars")
         assert "blue" in calendars.text
         assert "#1a73e8" in calendars.text
-        assert "Private" in calendars.text
+        assert "In this hub" in calendars.text
         assert "Home" in calendars.text
         assert "<form" not in calendars.text
 
@@ -314,8 +319,8 @@ def test_dutch_ui_keeps_english_json(tmp_path: Path, monkeypatch) -> None:
         assert page.status_code == 200
         assert page.cookies.get("hub_lang") == "nl"
         assert 'lang="nl"' in page.text
-        assert "Privé" in page.text
-        assert "niet van toepassing" in page.text
+        assert "In deze hub" in page.text
+        assert "geen synchronisatie" in page.text
         assert "Bronnen" in page.text
         fragment = client.post(
             f"/sources/{created['id']}/enabled",
@@ -324,8 +329,8 @@ def test_dutch_ui_keeps_english_json(tmp_path: Path, monkeypatch) -> None:
         )
         assert fragment.status_code == 200
         assert "lang" not in fragment.request.url.query.decode()
-        assert "Privé" in fragment.text
-        assert "niet van toepassing" in fragment.text
+        assert "In deze hub" in fragment.text
+        assert "geen synchronisatie" in fragment.text
         assert "Aanzetten" in fragment.text
         body = client.get("/api/sources").json()["sources"][0]
         assert body["kind_label"] == "Private"
@@ -355,7 +360,7 @@ def test_errors_use_codes_and_keep_stored_sentences(tmp_path: Path, monkeypatch)
             session.get(SyncState, unknown["id"]).last_error_message = "A custom operator note."
         page = client.get("/sync?lang=nl")
         assert page.status_code == 200
-        assert page.text.count("Het event kon niet worden opgeslagen.") >= 2
+        assert page.text.count("De afspraak kon niet worden opgeslagen.") >= 2
         assert "A custom operator note." in page.text
         assert "sentence.event_saved" not in page.text
         rows = {row["name"]: row for row in client.get("/api/sync").json()["sources"]}

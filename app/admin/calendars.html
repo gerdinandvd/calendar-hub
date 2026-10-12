@@ -2,12 +2,12 @@
 {% block main %}
 <h1>{{ t('nav.calendars') }}</h1>
 {% if not calendars %}
-<p>{{ t('empty.sources') }}</p>
+<p>{{ t('empty.calendars') }}</p>
 {% else %}
 <ul>
   {% for item in calendars %}
   <li>
-    <span>{{ item.name }}</span>
+    <a href="/sources/{{ item.id }}">{{ item.name }}</a>
     <span class="swatch" style="background: {{ item.color }}"></span>
     <span>{{ t('color.' ~ item.color_name) }}</span>
     <span>{{ t('kind.' ~ item.kind) }}</span>

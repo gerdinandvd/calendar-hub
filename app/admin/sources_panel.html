@@ -26,7 +26,7 @@
     <tbody>
       {% for source in sources %}
       <tr>
-        <td>{{ source.name }}</td>
+        <td><a href="/sources/{{ source.id }}">{{ source.name }}</a></td>
         <td>{{ t('kind.' ~ source.kind) }}</td>
         <td>{{ t('status.' ~ source.status) }}</td>
         <td>
@@ -53,11 +53,12 @@
           <button type="button" onclick="document.getElementById('delete-{{ source.id }}').showModal()">{{ t('action.delete') }}</button>
           <dialog id="delete-{{ source.id }}" aria-labelledby="delete-title-{{ source.id }}">
             <h2 id="delete-title-{{ source.id }}">{{ t('dialog.delete_source') }}</h2>
+            <p>{{ source.name }}</p>
             <p>{{ t('dialog.delete_body') }}</p>
             <form method="post" action="/sources/{{ source.id }}/delete" hx-post="/sources/{{ source.id }}/delete" hx-target="#sources-panel" hx-swap="outerHTML">
               <input type="hidden" name="confirm" value="true">
               <button type="button" onclick="this.closest('dialog').close()">{{ t('action.cancel') }}</button>
-              <button type="submit">{{ t('action.delete') }}</button>
+              <button type="submit">{{ t('dialog.delete_source') }}</button>
             </form>
           </dialog>
         </td>

@@ -286,7 +286,7 @@ def test_oauth_state_is_one_time_and_the_button_says_read_only(tmp_path: Path, m
         page = client.get(f"/sources/{created['id']}")
         link = (
             f'<a href="/api/oauth/google/start?source_id={created["id"]}">'
-            "Connect. This connection only reads and does not write back.</a>"
+            "Connect Google</a>"
         )
         assert link in page.text
         assert "hx-get" not in link
@@ -314,10 +314,14 @@ def test_oauth_state_is_one_time_and_the_button_says_read_only(tmp_path: Path, m
 
         google.token_payload = {**google.token_payload, "scope": WRITE_SCOPE}
         rejected = _callback(client, state)
+        assert urlsplit(rejected.headers["location"]).path == f"/sources/{created['id']}"
         assert parse_qs(urlsplit(rejected.headers["location"]).query)["google"] == ["scope"]
         assert [item["path"] for item in google.requests] == ["/token"]
-        home = client.get("/?google=scope")
-        assert "The Google connection can write, so it was not saved." in home.text
+        landed = client.get(rejected.headers["location"])
+        assert (
+            "Google granted write access. Only read access is allowed, so the connection was not saved."
+            in landed.text
+        )
         with Session(client.app.state.engine) as session:
             assert session.get(SourceSecret, created["id"]) is None
 
@@ -339,7 +343,8 @@ def test_oauth_state_is_one_time_and_the_button_says_read_only(tmp_path: Path, m
         with Session(client.app.state.engine) as session:
             assert session.get(SourceSecret, created["id"]).oauth_refresh_token == stored_refresh
         connected = client.get(f"/sources/{created['id']}")
-        assert "Reconnect. This connection only reads and does not write back." in connected.text
+        assert "Reconnect Google</a>" in connected.text
+        assert "This connection can only read. It does not change the Google calendar." in connected.text
         assert "refresh-marker-value" not in connected.text
         assert "access-marker-value" not in connected.text
         assert "refresh-marker-value" not in client.get("/api/sources").text
@@ -370,6 +375,7 @@ def test_oauth_state_is_one_time_and_the_button_says_read_only(tmp_path: Path, m
         blocked = _start(client, created["id"])
         blocked_state = parse_qs(urlsplit(blocked.headers["location"]).query)["state"][0]
         refused = _callback(client, blocked_state)
+        assert urlsplit(refused.headers["location"]).path == f"/sources/{created['id']}"
         assert parse_qs(urlsplit(refused.headers["location"]).query)["google"] == ["scope"]
         with Session(client.app.state.engine) as session:
             secret = session.get(SourceSecret, created["id"])

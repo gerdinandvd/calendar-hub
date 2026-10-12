@@ -1,0 +1,58 @@
+<div id="source-main">
+  <h1>{{ heading }}</h1>
+  {% if notice %}
+  <div id="form-error" tabindex="-1" role="alert">{{ notice }}</div>
+  {% elif banner %}
+  <div id="form-error" tabindex="-1" role="alert">{{ banner }}</div>
+  {% endif %}
+  {% if saved %}
+  <p id="source-saved">{{ t('sentence.saved') }}</p>
+  {% endif %}
+  {% if workplace %}
+  <p>{{ t('column.status') }}: {{ t('status.' ~ source.status) }}</p>
+  {% if source.kind == "private" %}
+  <p>{{ t('hint.private') }}</p>
+  {% endif %}
+  {% if sync_error %}
+  <p>{{ sync_error }}</p>
+  {% endif %}
+  <p>
+    <span>{{ t('state.on') if source.enabled else t('state.off') }}</span>
+  </p>
+  <form method="post" action="/sources/{{ source.id }}/enabled?view=source" hx-post="/sources/{{ source.id }}/enabled?view=source" hx-target="#source-main" hx-swap="outerHTML">
+    {% if source.enabled %}
+    <input type="hidden" name="enabled" value="0">
+    <button type="submit">{{ t('action.turn_off') }}</button>
+    {% else %}
+    <input type="hidden" name="enabled" value="1">
+    <button type="submit">{{ t('action.turn_on') }}</button>
+    {% endif %}
+  </form>
+  {% if source.kind == "google" or source.kind == "ics" %}
+  <form method="post" action="/sources/{{ source.id }}/sync?view=source" hx-post="/sources/{{ source.id }}/sync?view=source" hx-target="#source-main" hx-swap="outerHTML">
+    <button type="submit">{{ t('action.sync') }}</button>
+  </form>
+  {% endif %}
+  <p>{{ t('hint.collection') }}</p>
+  <p><a href="{{ source.collection_url }}">{{ source.collection_url }}</a></p>
+  <button type="button" onclick="document.getElementById('delete-{{ source.id }}').showModal()">{{ t('action.delete') }}</button>
+  <dialog id="delete-{{ source.id }}" aria-labelledby="delete-title-{{ source.id }}">
+    <h2 id="delete-title-{{ source.id }}">{{ t('dialog.delete_source') }}</h2>
+    <p>{{ source.name }}</p>
+    <p>{{ t('dialog.delete_body') }}</p>
+    <form method="post" action="/sources/{{ source.id }}/delete?view=source" hx-post="/sources/{{ source.id }}/delete?view=source" hx-target="#source-main" hx-swap="outerHTML">
+      <input type="hidden" name="confirm" value="true">
+      <button type="button" onclick="this.closest('dialog').close()">{{ t('action.cancel') }}</button>
+      <button type="submit">{{ t('dialog.delete_source') }}</button>
+    </form>
+  </dialog>
+  {% endif %}
+  {% include "source_form.html" %}
+  {% if google_connect %}
+  <p><a href="{{ google_connect.href }}">{{ t(google_connect.label) }}</a></p>
+  <p>{{ t('sentence.read_only') }}</p>
+  {% endif %}
+  {% if webhook_url %}
+  {% include "webhook_panel.html" %}
+  {% endif %}
+</div>

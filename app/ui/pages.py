@@ -17,7 +17,6 @@ from app.api.sources import (
     delete_source,
     endpoint_url,
     get_source,
-    list_calendars,
     list_sources,
     list_sync_status,
     poll_from_form,
@@ -114,10 +113,8 @@ async def create_source_page(request: Request, kind: str = "private") -> HTMLRes
             errors=_errors(result, request),
         )
     if chosen == "webhook":
-        return _secret_fragment(request, result["id"], result.get("webhook_secret", ""))
-    if chosen == "google":
-        return _redirect(f"/sources/{result['id']}")
-    return _redirect("/sources")
+        return _created_workspace(request, result["id"], result.get("webhook_secret", ""))
+    return _redirect(f"/sources/{result['id']}")
 
 
 @router.get("/sources/{source_id}")
@@ -125,15 +122,8 @@ def edit_source_page(source_id: str, request: Request) -> HTMLResponse:
     found = get_source(request.app.state.engine, source_id)
     if found is None:
         raise HTTPException(status_code=404)
-    return _form_page(
-        request,
-        mode="edit",
-        draft=_draft(found["name"], found["timezone"], found["id"], source=found),
-        errors=_blank_errors(),
-        kind=found["kind"],
-        webhook=_webhook_view(found),
-        google_connect=_google_connect(found),
-    )
+    notice = _GOOGLE_NOTICE.get(request.query_params.get("google", ""), "")
+    return _page(request, "source_page.html", _edit_context(request, found, notice=notice))
 
 
 @router.post("/sources/{source_id}")
@@ -175,7 +165,7 @@ async def update_source_page(source_id: str, request: Request) -> HTMLResponse:
             errors=_errors(result, request),
             kind=found["kind"],
         )
-    return _redirect("/sources")
+    return _saved(request, source_id)
 
 
 @router.post("/sources/{source_id}/enabled")
@@ -183,7 +173,7 @@ async def set_enabled(source_id: str, request: Request) -> HTMLResponse:
     form = await _form(request)
     raw = form.get("enabled", "")
     if raw not in {"0", "1"}:
-        return _sources_panel(request, "Enabled must be 0 or 1.")
+        return _after_mutation(request, source_id, "sentence.enabled")
     result = update_source(
         request.app.state.engine,
         request.app.state.radicale,
@@ -193,8 +183,8 @@ async def set_enabled(source_id: str, request: Request) -> HTMLResponse:
     if isinstance(result, SourceFailure):
         if result.status == 404:
             raise HTTPException(status_code=404)
-        return _sources_panel(request, result.detail)
-    return _sources_panel(request, "")
+        return _after_mutation(request, source_id, result.detail)
+    return _after_mutation(request, source_id, "")
 
 
 @router.post("/sources/{source_id}/delete")
@@ -209,7 +199,9 @@ async def delete_source_page(source_id: str, request: Request) -> HTMLResponse:
     if isinstance(result, SourceFailure):
         if result.status == 404:
             raise HTTPException(status_code=404)
-        return _sources_panel(request, result.detail)
+        return _after_mutation(request, source_id, result.detail)
+    if request.query_params.get("view", "") == "source":
+        return _redirect("/sources")
     return _sources_panel(request, "")
 
 
@@ -220,7 +212,7 @@ def rotate_secret_page(source_id: str, request: Request) -> HTMLResponse:
         if result.status == 404:
             raise HTTPException(status_code=404)
         return _panel(request, source_id, "", result.detail)
-    return _secret_panel(request, source_id, result.get("webhook_secret", ""))
+    return _secret_panel(request, source_id, result.get("webhook_secret", ""), replaced=True)
 
 
 @router.post("/sources/{source_id}/sync")
@@ -238,6 +230,8 @@ def sync_source_page(source_id: str, request: Request) -> HTMLResponse:
             "sync_panel.html",
             {"sources": _sync_rows(request), "error": _sentence(request, form_error)},
         )
+    if view == "source":
+        return _source_main(request, source_id, banner=form_error)
     return _sources_panel(request, form_error)
 
 
@@ -248,7 +242,7 @@ def calendars_page(request: Request) -> HTMLResponse:
         "calendars.html",
         {
             "title": _t(request)("nav.calendars"),
-            "calendars": list_calendars(request.app.state.engine),
+            "calendars": list_sources(request.app.state.engine),
         },
     )
 
@@ -460,31 +454,106 @@ def _form_context(
         "webhook_secret": "",
         "source_id": draft["id"],
         "error": "",
+        "workplace": False,
+        "source": None,
+        "saved": False,
+        "notice": "",
+        "banner": "",
+        "sync_error": "",
+        "replaced": False,
     }
 
 
-def _secret_fragment(request: Request, source_id: str, secret: str) -> HTMLResponse:
-    response = _render(
+def _created_workspace(request: Request, source_id: str, secret: str) -> HTMLResponse:
+    response = _source_main(request, source_id, webhook_secret=secret)
+    response.headers["Cache-Control"] = "no-store"
+    response.headers["HX-Retarget"] = "main"
+    response.headers["HX-Reswap"] = "innerHTML"
+    response.headers["HX-Replace-Url"] = f"/sources/{source_id}"
+    return response
+
+
+def _saved(request: Request, source_id: str) -> HTMLResponse:
+    response = _source_main(request, source_id, saved=True)
+    response.headers["HX-Retarget"] = "main"
+    response.headers["HX-Reswap"] = "innerHTML"
+    return response
+
+
+def _after_mutation(request: Request, source_id: str, error: str) -> HTMLResponse:
+    if request.query_params.get("view", "") == "source":
+        return _source_main(request, source_id, banner=error)
+    return _sources_panel(request, error)
+
+
+def _source_main(
+    request: Request,
+    source_id: str,
+    *,
+    banner: str = "",
+    saved: bool = False,
+    notice: str = "",
+    webhook_secret: str = "",
+    replaced: bool = False,
+) -> HTMLResponse:
+    found = get_source(request.app.state.engine, source_id)
+    if found is None:
+        raise HTTPException(status_code=404)
+    return _render(
         request,
-        "webhook_created.html",
-        {
-            "webhook_url": endpoint_url(source_id),
-            "webhook_secret": secret,
-            "source_id": source_id,
-            "error": "",
-        },
+        "source_main.html",
+        _edit_context(
+            request,
+            found,
+            banner=banner,
+            saved=saved,
+            notice=notice,
+            webhook_secret=webhook_secret,
+            replaced=replaced,
+        ),
     )
+
+
+def _edit_context(
+    request: Request,
+    found: dict,
+    *,
+    banner: str = "",
+    saved: bool = False,
+    notice: str = "",
+    webhook_secret: str = "",
+    replaced: bool = False,
+) -> dict:
+    context = _form_context(
+        "edit",
+        _draft(found["name"], found["timezone"], found["id"], source=found),
+        _blank_errors(),
+        kind=found["kind"],
+        webhook=_webhook_view(found),
+        translate=_t(request),
+    )
+    context["google_connect"] = _google_connect(found)
+    context["heading"] = found["name"]
+    context["title"] = found["name"]
+    context["workplace"] = True
+    context["source"] = found
+    context["saved"] = saved
+    context["notice"] = _sentence(request, notice) if notice else ""
+    context["banner"] = _sentence(request, banner) if banner else ""
+    context["webhook_secret"] = webhook_secret
+    context["replaced"] = replaced
+    row = next((item for item in _sync_rows(request) if item["id"] == found["id"]), None)
+    context["sync_error"] = "" if row is None else (row.get("last_error_message") or "")
+    return context
+
+
+def _secret_panel(request: Request, source_id: str, secret: str, *, replaced: bool = False) -> HTMLResponse:
+    response = _panel(request, source_id, secret, "", replaced=replaced)
     response.headers["Cache-Control"] = "no-store"
     return response
 
 
-def _secret_panel(request: Request, source_id: str, secret: str) -> HTMLResponse:
-    response = _panel(request, source_id, secret, "")
-    response.headers["Cache-Control"] = "no-store"
-    return response
-
-
-def _panel(request: Request, source_id: str, secret: str, error: str) -> HTMLResponse:
+def _panel(request: Request, source_id: str, secret: str, error: str, *, replaced: bool = False) -> HTMLResponse:
     return _render(
         request,
         "webhook_panel.html",
@@ -493,6 +562,7 @@ def _panel(request: Request, source_id: str, secret: str, error: str) -> HTMLRes
             "webhook_secret": secret,
             "source_id": source_id,
             "error": _sentence(request, error),
+            "replaced": replaced,
         },
     )
 
@@ -626,7 +696,7 @@ def _google_connect(found: dict) -> dict | None:
         return None
     return {
         "href": f"/api/oauth/google/start?source_id={found['id']}",
-        "label": "sentence.reconnect" if found.get("google_connected") else "sentence.connect",
+        "label": "action.reconnect_google" if found.get("google_connected") else "action.connect_google",
     }
 
 

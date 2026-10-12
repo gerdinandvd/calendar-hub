@@ -54,11 +54,11 @@ def test_english_renders_keys_and_leaves_unknown_text() -> None:
 
 def test_present_translates_keys_legacy_sentences_and_unknown_text() -> None:
     assert present("en", "sentence.event_saved") == "The event could not be saved."
-    assert present("nl", "sentence.event_saved") == "Het event kon niet worden opgeslagen."
+    assert present("nl", "sentence.event_saved") == "De afspraak kon niet worden opgeslagen."
     assert present("nl", "sentence.enter_name sentence.timezone") == (
         "Vul een naam in. Vul een geldige tijdzone in."
     )
-    assert present("nl", "The event could not be saved.") == "Het event kon niet worden opgeslagen."
+    assert present("nl", "The event could not be saved.") == "De afspraak kon niet worden opgeslagen."
     assert present("nl", "Radicale is not reachable.") == "Radicale is niet bereikbaar."
     assert present("nl", "A custom operator note.") == "A custom operator note."
     assert present("en", "") == ""
