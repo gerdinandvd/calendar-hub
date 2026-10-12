@@ -14,7 +14,8 @@ from app.db.models import EventMapping, SourceSecret, SyncState
 from app.main import create_app
 from app.radicale.client import RadicaleError
 from app.secrets import decrypt
-from app.sync.runner import CAPACITY_MESSAGE, MAX_EVENTS, RunStats, SlotBusy, run_source
+from app.sync.apply import CAPACITY_MESSAGE, MAX_EVENTS, RunStats
+from app.sync.runner import SlotBusy, run_source
 from app.sync.webhook import parse
 
 JSON = {"Content-Type": "application/json"}

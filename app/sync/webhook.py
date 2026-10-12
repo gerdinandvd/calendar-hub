@@ -1,18 +1,30 @@
-"""Webhook import. Validates a payload and records the mapping."""
+"""Webhook import. Validates a payload and writes one event through apply."""
 
 import hashlib
 import json
 import re
-import uuid
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
-from urllib.parse import quote
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from sqlalchemy import select
+from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session
 
-from app.db.models import EventMapping
+from app.sync.apply import (
+    CAPACITY_MESSAGE,
+    MAX_EVENTS,
+    RunError,
+    RunStats,
+    delete_event,
+    event_path,
+    live_count,
+    load_mapping,
+    new_uid,
+    put_event,
+    remember,
+    remember_delete,
+    utc_now,
+)
 from app.sync.ical import CalendarEvent, build_vcalendar
 
 _DATE = re.compile(r"^(\d{4})-(\d{2})-(\d{2})$")
@@ -77,9 +89,12 @@ def parse(payload: object, source_timezone: str) -> Upsert | Delete:
     raise ParseError("Action must be upsert or delete.")
 
 
-def event_path(collection_path: str, uid: str) -> str:
-    base = collection_path if collection_path.endswith("/") else f"{collection_path}/"
-    return f"{base}{quote(uid, safe='')}.ics"
+def apply(engine: Engine, radicale, source: dict, command: Upsert | Delete) -> RunStats:
+    """Write one webhook command. The runner holds the source slot."""
+
+    if isinstance(command, Delete):
+        return _apply_delete(engine, radicale, source, command)
+    return _apply_upsert(engine, radicale, source, command)
 
 
 def calendar_bytes(command: Upsert, uid: str) -> bytes:
@@ -102,47 +117,50 @@ def calendar_bytes(command: Upsert, uid: str) -> bytes:
     return text.encode("utf-8")
 
 
-def new_uid() -> str:
-    return str(uuid.uuid4())
+def _apply_delete(engine: Engine, radicale, source: dict, command: Delete) -> RunStats:
+    with Session(engine) as session:
+        mapping = load_mapping(session, source["id"], command.external_id)
+        if mapping is None or mapping.deleted_at:
+            return RunStats(seen=1)
+        uid = mapping.ical_uid
+    path = event_path(source["collection_path"], uid)
+    try:
+        delete_event(radicale, path)
+    except RunError as exc:
+        raise RunError(exc.message, RunStats(seen=1)) from None
+    when = utc_now()
+    with Session(engine) as session, session.begin():
+        mapping = load_mapping(session, source["id"], command.external_id)
+        if mapping is not None:
+            remember_delete(mapping, when)
+    return RunStats(seen=1, deleted=1)
 
 
-def load_mapping(session: Session, source_id: str, external_id: str) -> EventMapping | None:
-    stmt = select(EventMapping).where(
-        EventMapping.source_id == source_id,
-        EventMapping.external_id == external_id,
-    )
-    return session.scalar(stmt)
-
-
-def remember_upsert(
-    session: Session,
-    source_id: str,
-    command: Upsert,
-    uid: str,
-    when: str,
-) -> None:
-    mapping = load_mapping(session, source_id, command.external_id)
-    if mapping is None:
-        session.add(
-            EventMapping(
-                id=str(uuid.uuid4()),
-                source_id=source_id,
-                external_id=command.external_id,
-                ical_uid=uid,
-                external_version=command.revision,
-                last_synced_at=when,
-                deleted_at=None,
-            )
-        )
-        return
-    mapping.external_version = command.revision
-    mapping.last_synced_at = when
-    mapping.deleted_at = None
-
-
-def remember_delete(mapping: EventMapping, when: str) -> None:
-    mapping.deleted_at = when
-    mapping.last_synced_at = when
+def _apply_upsert(engine: Engine, radicale, source: dict, command: Upsert) -> RunStats:
+    with Session(engine) as session:
+        mapping = load_mapping(session, source["id"], command.external_id)
+        if (
+            mapping is not None
+            and mapping.deleted_at is None
+            and mapping.external_version == command.revision
+        ):
+            return RunStats(seen=1)
+        is_new = mapping is None or mapping.deleted_at is not None
+        uid = mapping.ical_uid if mapping is not None else new_uid()
+    if is_new:
+        occupied = live_count(radicale, source["collection_path"], RunStats(seen=1))
+        if occupied >= MAX_EVENTS:
+            raise RunError(CAPACITY_MESSAGE, RunStats(seen=1))
+    body = calendar_bytes(command, uid)
+    path = event_path(source["collection_path"], uid)
+    try:
+        put_event(radicale, path, body, fresh=is_new)
+    except RunError as exc:
+        raise RunError(exc.message, RunStats(seen=1)) from None
+    when = utc_now()
+    with Session(engine) as session, session.begin():
+        remember(session, source["id"], command.external_id, uid, command.revision, when)
+    return RunStats(seen=1, upserted=1)
 
 
 def _parse_delete(payload: dict) -> Delete:

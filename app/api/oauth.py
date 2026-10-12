@@ -10,11 +10,11 @@ from fastapi.responses import RedirectResponse, Response
 from sqlalchemy.orm import Session
 
 from app.access import json_error
-from app.db.models import Source, SourceSecret
+from app.db.models import Source
 from app.log import log_mutation
-from app.secrets import SecretKeyError, encrypt
+from app.secrets import SecretKeyError
 from app.sync import google
-from app.sync.google import TokenBundle
+from app.sync.google import store_tokens
 
 router = APIRouter()
 
@@ -108,31 +108,9 @@ def google_callback(
     except google.GoogleError:
         return RedirectResponse("/?google=token", status_code=302)
     try:
-        _save_tokens(engine, source_id, bundle)
+        store_tokens(engine, source_id, bundle)
     except SecretKeyError:
         return RedirectResponse("/?google=token", status_code=302)
     log_mutation(actor="owner", source_id=source_id, message="connected google source")
     return RedirectResponse(f"/sources/{source_id}", status_code=302)
 
-
-def _save_tokens(engine, source_id: str, bundle: TokenBundle) -> None:
-    with Session(engine) as session, session.begin():
-        secret = session.get(SourceSecret, source_id)
-        refresh = encrypt(bundle.refresh_token)
-        access = encrypt(bundle.access_token)
-        expiry = encrypt(bundle.expiry)
-        if secret is None:
-            session.add(
-                SourceSecret(
-                    source_id=source_id,
-                    webhook_secret=None,
-                    oauth_refresh_token=refresh,
-                    oauth_access_token=access,
-                    oauth_expiry=expiry,
-                    ics_authorization_header=None,
-                )
-            )
-            return
-        secret.oauth_refresh_token = refresh
-        secret.oauth_access_token = access
-        secret.oauth_expiry = expiry

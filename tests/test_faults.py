@@ -14,7 +14,8 @@ import test_webhook as webhook_tests
 from app.radicale.client import RadicaleClient
 from app.sync.google import FETCH_MESSAGE, READ_MESSAGE, TIMEOUT_SECONDS, _timeout
 from app.sync.ics import TIMEOUT_MESSAGE
-from app.sync.runner import PROCESS_STOPPED, SAVE_MESSAGE, stop_runs, wait_for
+from app.sync.apply import SAVE_MESSAGE
+from app.sync.runner import PROCESS_STOPPED, stop_runs, wait_for
 
 
 class _Store:

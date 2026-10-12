@@ -1,4 +1,4 @@
-"""Read-only Google Calendar import. Calendar writes stay in the runner."""
+"""Google Calendar import. Fetch stays read-only; import_source writes events through apply."""
 
 import json
 import os
@@ -13,12 +13,42 @@ from urllib.parse import quote, urlencode, urlsplit
 
 import http.client
 
+from sqlalchemy import select
+from sqlalchemy.engine import Engine
+from sqlalchemy.orm import Session
+
+from app.db.models import EventMapping, Source, SourceSecret, SyncState
+from app.secrets import SecretKeyError, decrypt, encrypt
+from app.sync.apply import (
+    CAPACITY_MESSAGE,
+    MAX_EVENTS,
+    SAVE_MESSAGE,
+    ImportResult,
+    RunError,
+    RunStats,
+    Stopped,
+    delete_mapped,
+    event_path,
+    live_count,
+    load_mapping,
+    mapping_is_new,
+    new_uid,
+    put_event,
+    read_event,
+    remember,
+    reraise,
+    utc_now,
+    write_parallel,
+)
 from app.sync.ical import (
     CalendarEvent,
     CalendarObject,
     CalendarParseError,
     Mark,
+    build_object,
     google_point,
+    merge_partial,
+    parse_vcalendar,
     recurrence_parts,
 )
 
@@ -651,3 +681,306 @@ def _dedupe(marks: tuple[Mark, ...]) -> tuple[Mark, ...]:
         if not any(mark.value == item.value and mark.all_day == item.all_day for item in chosen):
             chosen.append(mark)
     return tuple(chosen)
+
+
+def import_source(
+    engine: Engine,
+    radicale,
+    source_id: str,
+    *,
+    stop: Callable[[], bool],
+    on_invalid_cursor: Callable[[], None],
+) -> ImportResult:
+    """Read one Google calendar and write it. The runner stores the cursor after success."""
+
+    with Session(engine) as session:
+        row = session.get(Source, source_id)
+        state = session.get(SyncState, source_id)
+        if row is None or state is None:
+            raise RunError("The calendar feed could not be fetched.")
+        collection = row.collection_path
+        calendar_id = row.google_calendar_id or ""
+        cursor_raw = state.cursor
+        timezone_name = row.timezone
+    try:
+        loaded = load_tokens(engine, source_id)
+    except SecretKeyError:
+        raise RunError(FETCH_MESSAGE) from None
+    if loaded is None:
+        raise RunError(NOT_CONNECTED)
+    try:
+        snapshot = fetch_events(
+            calendar_id=calendar_id,
+            cursor=cursor_raw,
+            tokens=loaded,
+            source_timezone=timezone_name,
+            on_invalid_cursor=on_invalid_cursor,
+        )
+    except ScopeRejected as exc:
+        raise RunError(exc.message) from None
+    except GoogleError as exc:
+        if exc.invalidate_cursor:
+            on_invalid_cursor()
+        raise RunError(exc.message) from None
+    try:
+        store_tokens(engine, source_id, snapshot.tokens, keep_if_same=True)
+    except SecretKeyError:
+        raise RunError(FETCH_MESSAGE) from None
+    if stop():
+        if snapshot.cursor_invalidated:
+            on_invalid_cursor()
+        raise Stopped()
+    try:
+        stats = _apply_changes(engine, radicale, source_id, collection, timezone_name, snapshot, stop)
+    except (RunError, Stopped):
+        if snapshot.cursor_invalidated:
+            on_invalid_cursor()
+        raise
+    if stop():
+        if snapshot.cursor_invalidated:
+            on_invalid_cursor()
+        raise Stopped(stats)
+    return ImportResult(stats, snapshot.sync_token, True)
+
+
+def load_tokens(engine: Engine, source_id: str) -> TokenBundle | None:
+    with Session(engine) as session:
+        secret = session.get(SourceSecret, source_id)
+        refresh = None if secret is None else secret.oauth_refresh_token
+        access = None if secret is None else secret.oauth_access_token
+        expiry = None if secret is None else secret.oauth_expiry
+    if not refresh:
+        return None
+    return TokenBundle(
+        refresh_token=decrypt(refresh),
+        access_token=decrypt(access) if access else "",
+        expiry=decrypt(expiry) if expiry else "",
+    )
+
+
+def store_tokens(
+    engine: Engine,
+    source_id: str,
+    tokens: TokenBundle,
+    *,
+    keep_if_same: bool = False,
+) -> None:
+    """Store OAuth tokens. A sync passes keep_if_same so an unchanged token is left as it is."""
+
+    with Session(engine) as session, session.begin():
+        secret = session.get(SourceSecret, source_id)
+        if secret is not None and keep_if_same and _same_tokens(secret, tokens):
+            return
+        refresh = encrypt(tokens.refresh_token)
+        access = encrypt(tokens.access_token)
+        expiry = encrypt(tokens.expiry)
+        if secret is None:
+            session.add(
+                SourceSecret(
+                    source_id=source_id,
+                    webhook_secret=None,
+                    oauth_refresh_token=refresh,
+                    oauth_access_token=access,
+                    oauth_expiry=expiry,
+                    ics_authorization_header=None,
+                )
+            )
+            return
+        secret.oauth_refresh_token = refresh
+        secret.oauth_access_token = access
+        secret.oauth_expiry = expiry
+
+
+def _same_tokens(secret: SourceSecret, tokens: TokenBundle) -> bool:
+    current_refresh = decrypt(secret.oauth_refresh_token) if secret.oauth_refresh_token else ""
+    current_access = decrypt(secret.oauth_access_token) if secret.oauth_access_token else ""
+    current_expiry = decrypt(secret.oauth_expiry) if secret.oauth_expiry else ""
+    return (
+        current_refresh == tokens.refresh_token
+        and current_access == tokens.access_token
+        and current_expiry == tokens.expiry
+    )
+
+
+def _apply_changes(
+    engine: Engine,
+    radicale,
+    source_id: str,
+    collection: str,
+    timezone_name: str,
+    snapshot: GoogleSnapshot,
+    stop: Callable[[], bool],
+) -> RunStats:
+    stats = RunStats(seen=len(snapshot.changes))
+    live = live_count(radicale, collection, stats)
+    present: set[str] = set()
+    queued: list[GoogleChange] = []
+    blocked = False
+    for change in snapshot.changes:
+        if stop():
+            _count_changes(engine, radicale, source_id, collection, timezone_name, queued, stats, stop)
+            raise Stopped(stats)
+        if change.cancelled:
+            _count_changes(engine, radicale, source_id, collection, timezone_name, queued, stats, stop)
+            queued = []
+            try:
+                removed = delete_mapped(engine, radicale, source_id, collection, change.external_id)
+            except RunError as exc:
+                reraise(exc, stats)
+            if removed:
+                stats.deleted += 1
+                live -= 1
+            continue
+        is_new = mapping_is_new(engine, source_id, change.external_id)
+        if is_new and live >= MAX_EVENTS:
+            blocked = True
+            break
+        if is_new:
+            live += 1
+        present.add(change.external_id)
+        queued.append(change)
+    _count_changes(engine, radicale, source_id, collection, timezone_name, queued, stats, stop)
+    if blocked:
+        raise RunError(CAPACITY_MESSAGE, stats)
+    if stop():
+        raise Stopped(stats)
+    if snapshot.full:
+        _delete_absent(engine, radicale, source_id, collection, present, stats, stop)
+    return stats
+
+
+def _count_changes(
+    engine: Engine,
+    radicale,
+    source_id: str,
+    collection: str,
+    timezone_name: str,
+    changes: list[GoogleChange],
+    stats: RunStats,
+    stop: Callable[[], bool],
+) -> None:
+    if not changes:
+        return
+    try:
+        stats.upserted += write_parallel(
+            changes,
+            lambda change: _upsert_change(
+                engine,
+                radicale,
+                source_id,
+                collection,
+                timezone_name,
+                change,
+            )[0],
+            stop,
+        )
+    except (RunError, Stopped) as exc:
+        reraise(exc, stats)
+
+
+def _upsert_change(
+    engine: Engine,
+    radicale,
+    source_id: str,
+    collection: str,
+    timezone_name: str,
+    change: GoogleChange,
+) -> tuple[bool, bool]:
+    with Session(engine) as session:
+        mapping = load_mapping(session, source_id, change.external_id)
+        found = mapping is not None
+        deleted = mapping.deleted_at if mapping is not None else None
+        version = mapping.external_version if mapping is not None else None
+        if mapping is not None:
+            ical_uid = mapping.ical_uid
+        elif change.ical_uid:
+            ical_uid = change.ical_uid
+        else:
+            ical_uid = new_uid()
+    is_new = not found or deleted is not None
+    if change.replace or not found or deleted is not None:
+        obj = _object_from_change(change, ical_uid)
+    else:
+        obj = _merged_change(radicale, collection, timezone_name, change, ical_uid)
+    body = build_object(obj).encode("utf-8")
+    path = event_path(collection, ical_uid)
+    if found and deleted is None and version == change.etag:
+        current = read_event(radicale, path)
+        if current == body:
+            return False, False
+    put_event(radicale, path, body, fresh=is_new)
+    when = utc_now()
+    with Session(engine) as session, session.begin():
+        remember(session, source_id, change.external_id, ical_uid, change.etag, when)
+    return True, is_new
+
+
+def _object_from_change(change: GoogleChange, uid: str) -> CalendarObject:
+    if change.master is None:
+        raise RunError(SAVE_MESSAGE)
+    chosen: list = []
+    for mark in change.master.exdates + change.added_exdates:
+        if not any(mark.value == item.value and mark.all_day == item.all_day for item in chosen):
+            chosen.append(mark)
+    master = replace(change.master, uid=uid, exdates=tuple(chosen))
+    components = [master]
+    components.extend(replace(item, uid=uid) for item in change.exceptions)
+    return CalendarObject(uid=uid, version=change.etag, components=tuple(components))
+
+
+def _merged_change(
+    radicale,
+    collection: str,
+    timezone_name: str,
+    change: GoogleChange,
+    ical_uid: str,
+) -> CalendarObject:
+    path = event_path(collection, ical_uid)
+    current = read_event(radicale, path)
+    if not current:
+        return _object_from_change(change, ical_uid)
+    try:
+        parsed = parse_vcalendar(current.decode("utf-8"), timezone_name)
+    except (UnicodeError, CalendarParseError):
+        raise RunError(SAVE_MESSAGE) from None
+    if len(parsed) != 1:
+        raise RunError(SAVE_MESSAGE)
+    try:
+        return merge_partial(
+            parsed[0],
+            change.master,
+            change.exceptions,
+            change.added_exdates,
+            uid=ical_uid,
+            version=change.etag,
+        )
+    except CalendarParseError:
+        raise RunError(SAVE_MESSAGE) from None
+
+
+def _delete_absent(
+    engine: Engine,
+    radicale,
+    source_id: str,
+    collection: str,
+    present: set[str],
+    stats: RunStats,
+    stop: Callable[[], bool],
+) -> None:
+    with Session(engine) as session:
+        rows = session.scalars(
+            select(EventMapping).where(
+                EventMapping.source_id == source_id,
+                EventMapping.deleted_at.is_(None),
+            )
+        ).all()
+        missing = [row.external_id for row in rows if row.external_id not in present]
+    for external_id in missing:
+        if stop():
+            raise Stopped(stats)
+        try:
+            removed = delete_mapped(engine, radicale, source_id, collection, external_id)
+        except RunError as exc:
+            reraise(exc, stats)
+        if removed:
+            stats.deleted += 1

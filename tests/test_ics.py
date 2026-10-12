@@ -16,7 +16,8 @@ from app.main import create_app
 from app.radicale.client import RadicaleError
 from app.secrets import decrypt
 from app.sync.ics import MAX_BYTES, TIMEOUT_SECONDS
-from app.sync.runner import CAPACITY_MESSAGE, MAX_EVENTS, PROCESS_STOPPED, stop_runs, wait_for
+from app.sync.apply import CAPACITY_MESSAGE, MAX_EVENTS
+from app.sync.runner import PROCESS_STOPPED, stop_runs, wait_for
 from app.sync.scheduler import due_source_ids
 
 JSON = {"Content-Type": "application/json"}
