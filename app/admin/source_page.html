@@ -1,11 +1,7 @@
 {% extends "base.html" %}
 {% block main %}
 <h1>{{ heading }}</h1>
-{% if mode == "webhook" %}
-{% include "webhook_form.html" %}
-{% else %}
 {% include "source_form.html" %}
-{% endif %}
 {% if google_connect %}
 <p><a href="{{ google_connect.href }}">{{ google_connect.label }}</a></p>
 {% endif %}

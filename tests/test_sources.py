@@ -199,6 +199,11 @@ def test_admin_pages_and_field_errors(tmp_path: Path, monkeypatch) -> None:
         assert "Add a source" in home.text
         assert "Sources" in home.text
         assert "Calendars" in home.text
+        assert home.text.count('href="/sources"') == 1
+        assert home.text.count('href="/calendars"') == 1
+        assert home.text.count('href="/sync"') == 1
+        assert home.text.count('href="/health"') == 1
+        assert 'href="/" aria-current="page"' in home.text
         assert "The password is the password of HUB_USER." in home.text
         assert "Android uses DAVx⁵ to reach the calendar app on the device." in home.text
         assert "iOS uses the calendar app." in home.text
@@ -239,6 +244,7 @@ def test_admin_pages_and_field_errors(tmp_path: Path, monkeypatch) -> None:
         assert created.headers["hx-redirect"] == "/sources"
         page = client.get("/sources")
         assert "Home" in page.text
+        assert 'href="/sources" aria-current="page"' in page.text
         assert "Private" in page.text
         assert "not applicable" in page.text
         assert "Turn off" in page.text

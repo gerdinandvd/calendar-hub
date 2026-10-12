@@ -11,11 +11,11 @@
   <header>
     <p class="brand">{{ t('brand') }}</p>
     <nav>
-      <a href="/">{{ t('nav.home') }}</a>
-      <a href="/sources">{{ t('nav.sources') }}</a>
-      <a href="/calendars">{{ t('nav.calendars') }}</a>
-      <a href="/sync">{{ t('nav.sync') }}</a>
-      <a href="/health">{{ t('nav.health') }}</a>
+      <a href="/" {% if section == "home" %}aria-current="page"{% endif %}>{{ t('nav.home') }}</a>
+      <a href="/sources" {% if section == "sources" %}aria-current="page"{% endif %}>{{ t('nav.sources') }}</a>
+      <a href="/calendars" {% if section == "calendars" %}aria-current="page"{% endif %}>{{ t('nav.calendars') }}</a>
+      <a href="/sync" {% if section == "sync" %}aria-current="page"{% endif %}>{{ t('nav.sync') }}</a>
+      <a href="/health" {% if section == "health" %}aria-current="page"{% endif %}>{{ t('nav.health') }}</a>
     </nav>
     <p class="lang">
       <a href="{{ request.url.include_query_params(lang='en').path }}?{{ request.url.include_query_params(lang='en').query }}">{{ t('lang.en') }}</a>

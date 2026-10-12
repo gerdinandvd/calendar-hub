@@ -5,10 +5,6 @@
 <div id="form-error" role="alert">{{ notice }}</div>
 {% endif %}
 <p>{{ t('home.intro') }}</p>
-<p><a href="/sources">{{ t('nav.sources') }}</a></p>
-<p><a href="/calendars">{{ t('nav.calendars') }}</a></p>
-<p><a href="/sync">{{ t('nav.sync') }}</a></p>
-<p><a href="/health">{{ t('nav.health') }}</a></p>
 {% if not sources %}
 <p>{{ t('empty.sources') }}</p>
 {% endif %}

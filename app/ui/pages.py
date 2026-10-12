@@ -304,7 +304,19 @@ def _health_view(request: Request) -> dict[str, object]:
     shown = dict(report)
     for key in ("radicale_error", "litestream_error", "kopia_error"):
         shown[key] = _sentence(request, str(report.get(key) or ""))
+    shown["disk_free"] = _format_bytes(int(report["disk_free_bytes"]))
     return shown
+
+
+def _format_bytes(amount: int) -> str:
+    size = float(amount)
+    for unit in ("B", "KB", "MB", "GB"):
+        if size < 1024:
+            if unit == "B":
+                return f"{int(size)} B"
+            return f"{size:.1f} {unit}"
+        size /= 1024
+    return f"{size:.1f} TB"
 
 
 def _page(request: Request, name: str, context: dict) -> HTMLResponse:
@@ -316,11 +328,21 @@ def _render(request: Request, name: str, context: dict) -> HTMLResponse:
     payload = dict(context)
     payload["t"] = translator(lang)
     payload["lang"] = lang
+    payload["section"] = _section(request.url.path)
     response = templates.TemplateResponse(request, name, payload)
     query = request.query_params.get("lang", "")
     if query in _LANGS:
         response.set_cookie(_LANG_COOKIE, query, path="/", samesite="lax", httponly=True)
     return response
+
+
+def _section(path: str) -> str:
+    if path == "/":
+        return "home"
+    for name in ("sources", "calendars", "sync", "health"):
+        if path == f"/{name}" or path.startswith(f"/{name}/"):
+            return name
+    return ""
 
 
 def _language(request: Request) -> str:
@@ -382,10 +404,9 @@ def _form_fragment(
     errors: dict[str, str],
     kind: str = "",
 ) -> HTMLResponse:
-    name = "webhook_form.html" if mode == "webhook" else "source_form.html"
     return _render(
         request,
-        name,
+        "source_form.html",
         _form_context(mode, draft, errors, kind=kind, translate=_t(request)),
     )
 
