@@ -179,5 +179,61 @@ def delete_mapped(
     return True
 
 
+def queue_until_capacity(
+    items: list,
+    *,
+    engine: Engine,
+    source_id: str,
+    external_id: Callable,
+    live: int,
+    stop: Callable[[], bool],
+) -> tuple[list, bool, int, bool]:
+    """Walk items until capacity or stop. Returns (queued, blocked, live, stopped)."""
+
+    queued: list = []
+    blocked = False
+    for item in items:
+        if stop():
+            return queued, blocked, live, True
+        is_new = mapping_is_new(engine, source_id, external_id(item))
+        if is_new and live >= MAX_EVENTS:
+            blocked = True
+            break
+        if is_new:
+            live += 1
+        queued.append(item)
+    return queued, blocked, live, False
+
+
+def delete_absent_mapped(
+    engine: Engine,
+    radicale: RadicaleClient,
+    source_id: str,
+    collection: str,
+    present: set[str],
+    stats: RunStats,
+    stop: Callable[[], bool],
+) -> None:
+    """Delete mapped events whose external_id is missing from a full snapshot."""
+
+    with Session(engine) as session:
+        rows = session.scalars(
+            select(EventMapping).where(
+                EventMapping.source_id == source_id,
+                EventMapping.deleted_at.is_(None),
+            )
+        ).all()
+        missing = [row.external_id for row in rows if row.external_id not in present]
+    for external_id in missing:
+        if stop():
+            raise Stopped(stats)
+        try:
+            removed = delete_mapped(engine, radicale, source_id, collection, external_id)
+        except RunError as exc:
+            reraise(exc, stats)
+        if removed:
+            stats.deleted += 1
+
+
 def utc_now() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")

@@ -2,41 +2,35 @@
 
 import json
 import os
-import socket
-import ssl
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from urllib.parse import urljoin, urlsplit
 
-import http.client
-
-from sqlalchemy import select
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session
 
-from app.db.models import EventMapping, Source, SourceSecret, SyncState
+from app.db.models import Source, SourceSecret, SyncState
 from app.secrets import SecretKeyError, decrypt
 from app.sync.apply import (
     CAPACITY_MESSAGE,
-    MAX_EVENTS,
     ImportResult,
     RunError,
     RunStats,
     Stopped,
-    delete_event,
+    delete_absent_mapped,
     event_path,
     live_count,
     load_mapping,
-    mapping_is_new,
     put_event,
+    queue_until_capacity,
     read_event,
     remember,
-    remember_delete,
     reraise,
     utc_now,
     write_parallel,
 )
+from app.sync.http import REDIRECTS, HttpError, request
 from app.sync.ical import CalendarObject, CalendarParseError, build_object, parse_vcalendar
 
 MAX_BYTES = 20 * 1024 * 1024
@@ -47,8 +41,6 @@ FETCH_MESSAGE = "sentence.feed_fetch"
 TIMEOUT_MESSAGE = "sentence.feed_timeout"
 SIZE_MESSAGE = "sentence.feed_size"
 READ_MESSAGE = "sentence.feed_read"
-
-_REDIRECTS = {301, 302, 303, 307, 308}
 
 
 class IcsError(Exception):
@@ -133,7 +125,7 @@ def load_feed(
             left,
             max_bytes,
         )
-        if status in _REDIRECTS:
+        if status in REDIRECTS:
             hops += 1
             location = headers.get("location")
             if hops > MAX_REDIRECTS or not location:
@@ -211,64 +203,20 @@ def _once(
     timeout: float,
     max_bytes: int,
 ) -> tuple[int, dict[str, str], bytes]:
-    parsed = urlsplit(url)
-    target = parsed.path or "/"
-    if parsed.query:
-        target = f"{target}?{parsed.query}"
-    port = parsed.port or (443 if parsed.scheme == "https" else 80)
-    if parsed.scheme == "https":
-        connection: http.client.HTTPConnection = http.client.HTTPSConnection(
-            parsed.hostname,
-            port,
-            timeout=timeout,
-            context=ssl.create_default_context(),
-        )
-    else:
-        connection = http.client.HTTPConnection(parsed.hostname, port, timeout=timeout)
     try:
-        try:
-            connection.request("GET", target, headers=headers)
-            response = connection.getresponse()
-            status = response.status
-            found = {name.lower(): value for name, value in response.getheaders()}
-            if status in _REDIRECTS or status == 304:
-                response.read(65536)
-                return status, found, b""
-            if status != 200:
-                response.read(65536)
-                return status, found, b""
-            body = _read_limited(response, max_bytes)
-        except IcsError:
-            raise
-        except (TimeoutError, socket.timeout):
+        return request(
+            "GET",
+            url,
+            headers=headers,
+            timeout=timeout,
+            max_bytes=max_bytes,
+        )
+    except HttpError as exc:
+        if exc.kind == "timeout":
             raise IcsError(TIMEOUT_MESSAGE) from None
-        except (OSError, http.client.HTTPException):
-            raise IcsError(FETCH_MESSAGE) from None
-    finally:
-        connection.close()
-    return status, found, body
-
-
-def _read_limited(response: http.client.HTTPResponse, max_bytes: int) -> bytes:
-    declared = response.getheader("Content-Length")
-    if declared is not None:
-        try:
-            size = int(declared)
-        except ValueError:
-            raise IcsError(FETCH_MESSAGE) from None
-        if size > max_bytes:
-            raise IcsError(SIZE_MESSAGE)
-    chunks: list[bytes] = []
-    total = 0
-    while True:
-        chunk = response.read(64 * 1024)
-        if not chunk:
-            break
-        total += len(chunk)
-        if total > max_bytes:
-            raise IcsError(SIZE_MESSAGE)
-        chunks.append(chunk)
-    return b"".join(chunks)
+        if exc.kind == "size":
+            raise IcsError(SIZE_MESSAGE) from None
+        raise IcsError(FETCH_MESSAGE) from None
 
 
 def _clean(value: str | None) -> str | None:
@@ -336,47 +284,23 @@ def _apply_snapshot(
     stats = RunStats(seen=len(loaded.objects))
     live = live_count(radicale, collection, stats)
     present = {obj.uid for obj in loaded.objects}
-    queued: list[CalendarObject] = []
-    blocked = False
-    for obj in loaded.objects:
-        if stop():
-            _count_objects(engine, radicale, source_id, collection, queued, stats, stop)
-            raise Stopped(stats)
-        is_new = mapping_is_new(engine, source_id, obj.uid)
-        if is_new and live >= MAX_EVENTS:
-            blocked = True
-            break
-        if is_new:
-            live += 1
-        queued.append(obj)
+    queued, blocked, _live, stopped = queue_until_capacity(
+        list(loaded.objects),
+        engine=engine,
+        source_id=source_id,
+        external_id=lambda obj: obj.uid,
+        live=live,
+        stop=stop,
+    )
+    if stopped:
+        _count_objects(engine, radicale, source_id, collection, queued, stats, stop)
+        raise Stopped(stats)
     _count_objects(engine, radicale, source_id, collection, queued, stats, stop)
     if blocked:
         raise RunError(CAPACITY_MESSAGE, stats)
     if stop():
         raise Stopped(stats)
-    with Session(engine) as session:
-        rows = session.scalars(
-            select(EventMapping).where(
-                EventMapping.source_id == source_id,
-                EventMapping.deleted_at.is_(None),
-            )
-        ).all()
-        missing = [(row.external_id, row.ical_uid) for row in rows if row.external_id not in present]
-    for external_id, ical_uid in missing:
-        if stop():
-            raise Stopped(stats)
-        path = event_path(collection, ical_uid)
-        try:
-            delete_event(radicale, path)
-        except RunError as exc:
-            reraise(exc, stats)
-        when = utc_now()
-        with Session(engine) as session, session.begin():
-            mapping = load_mapping(session, source_id, external_id)
-            if mapping is not None and mapping.deleted_at is None:
-                remember_delete(mapping, when)
-        stats.deleted += 1
-        live -= 1
+    delete_absent_mapped(engine, radicale, source_id, collection, present, stats, stop)
     return stats
 
 
