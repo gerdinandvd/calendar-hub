@@ -1,4 +1,4 @@
-"""HTML pages. Mutations go through the functions in api/."""
+"""HTML pages. Mutations go through the shared application services."""
 
 from pathlib import Path
 from urllib.parse import parse_qs
@@ -7,12 +7,13 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.templating import Jinja2Templates
 
-from app.api.routers.caldav_info import build_caldav_info
-from app.api.routers.health import report as health_report
-from app.api.services.sources import (
+from app.health import report as health_report
+from app.i18n import present, translator
+from app.services.sources import (
     DEFAULT_POLL_SECONDS,
     GOOGLE_POLL_SECONDS,
     SourceFailure,
+    build_caldav_info,
     create_source,
     delete_source,
     endpoint_url,
@@ -24,7 +25,6 @@ from app.api.services.sources import (
     start_sync,
     update_source,
 )
-from app.ui.text import present, translator
 
 _GOOGLE_NOTICE = {
     "state": "sentence.google_incomplete",
@@ -92,7 +92,9 @@ async def create_source_page(request: Request, kind: str = "private") -> HTMLRes
         return _form_fragment(
             request,
             mode=mode,
-            draft=_draft(form.get("name", ""), "Europe/Amsterdam", form=form, kind=chosen),
+            draft=_draft(
+                form.get("name", ""), "Europe/Amsterdam", form=form, kind=chosen
+            ),
             errors=_errors(extra_error, request),
         )
     result = create_source(
@@ -109,11 +111,15 @@ async def create_source_page(request: Request, kind: str = "private") -> HTMLRes
         return _form_fragment(
             request,
             mode=mode,
-            draft=_draft(form.get("name", ""), "Europe/Amsterdam", form=form, kind=chosen),
+            draft=_draft(
+                form.get("name", ""), "Europe/Amsterdam", form=form, kind=chosen
+            ),
             errors=_errors(result, request),
         )
     if chosen == "webhook":
-        return _created_workspace(request, result["id"], result.get("webhook_secret", ""))
+        return _created_workspace(
+            request, result["id"], result.get("webhook_secret", "")
+        )
     return _redirect(f"/sources/{result['id']}")
 
 
@@ -123,7 +129,9 @@ def edit_source_page(source_id: str, request: Request) -> HTMLResponse:
     if found is None:
         raise HTTPException(status_code=404)
     notice = _GOOGLE_NOTICE.get(request.query_params.get("google", ""), "")
-    return _page(request, "source_page.html", _edit_context(request, found, notice=notice))
+    return _page(
+        request, "source_page.html", _edit_context(request, found, notice=notice)
+    )
 
 
 @router.post("/sources/{source_id}")
@@ -161,7 +169,13 @@ async def update_source_page(source_id: str, request: Request) -> HTMLResponse:
         return _form_fragment(
             request,
             mode="edit",
-            draft=_draft(form.get("name", ""), form.get("timezone", ""), source_id, form=form, source=found),
+            draft=_draft(
+                form.get("name", ""),
+                form.get("timezone", ""),
+                source_id,
+                form=form,
+                source=found,
+            ),
             errors=_errors(result, request),
             kind=found["kind"],
         )
@@ -212,7 +226,9 @@ def rotate_secret_page(source_id: str, request: Request) -> HTMLResponse:
         if result.status == 404:
             raise HTTPException(status_code=404)
         return _panel(request, source_id, "", result.detail)
-    return _secret_panel(request, source_id, result.get("webhook_secret", ""), replaced=True)
+    return _secret_panel(
+        request, source_id, result.get("webhook_secret", ""), replaced=True
+    )
 
 
 @router.post("/sources/{source_id}/sync")
@@ -326,7 +342,9 @@ def _render(request: Request, name: str, context: dict) -> HTMLResponse:
     response = templates.TemplateResponse(request, name, payload)
     query = request.query_params.get("lang", "")
     if query in _LANGS:
-        response.set_cookie(_LANG_COOKIE, query, path="/", samesite="lax", httponly=True)
+        response.set_cookie(
+            _LANG_COOKIE, query, path="/", samesite="lax", httponly=True
+        )
     return response
 
 
@@ -379,7 +397,9 @@ def _form_page(
     google_connect: dict | None = None,
 ) -> HTMLResponse:
     translate = _t(request)
-    context = _form_context(mode, draft, errors, kind=kind, webhook=webhook, translate=translate)
+    context = _form_context(
+        mode, draft, errors, kind=kind, webhook=webhook, translate=translate
+    )
     if google_connect is None:
         context["google_connect"] = None
     else:
@@ -542,18 +562,24 @@ def _edit_context(
     context["banner"] = _sentence(request, banner) if banner else ""
     context["webhook_secret"] = webhook_secret
     context["replaced"] = replaced
-    row = next((item for item in _sync_rows(request) if item["id"] == found["id"]), None)
+    row = next(
+        (item for item in _sync_rows(request) if item["id"] == found["id"]), None
+    )
     context["sync_error"] = "" if row is None else (row.get("last_error_message") or "")
     return context
 
 
-def _secret_panel(request: Request, source_id: str, secret: str, *, replaced: bool = False) -> HTMLResponse:
+def _secret_panel(
+    request: Request, source_id: str, secret: str, *, replaced: bool = False
+) -> HTMLResponse:
     response = _panel(request, source_id, secret, "", replaced=replaced)
     response.headers["Cache-Control"] = "no-store"
     return response
 
 
-def _panel(request: Request, source_id: str, secret: str, error: str, *, replaced: bool = False) -> HTMLResponse:
+def _panel(
+    request: Request, source_id: str, secret: str, error: str, *, replaced: bool = False
+) -> HTMLResponse:
     return _render(
         request,
         "webhook_panel.html",
@@ -610,7 +636,10 @@ def _draft(
         allow = 0
         url = ""
         calendar = "primary" if kind == "google" else ""
-    header_set = bool(stored.get("ics_authorization_set")) and posted.get("clear_ics_authorization") != "1"
+    header_set = (
+        bool(stored.get("ics_authorization_set"))
+        and posted.get("clear_ics_authorization") != "1"
+    )
     return {
         "id": source_id or stored.get("id", ""),
         "name": name,
@@ -643,9 +672,13 @@ def _errors(failure: SourceFailure, request: Request) -> dict[str, str]:
         "timezone": _sentence(request, failure.fields.get("timezone", "")),
         "ics_url": _sentence(request, failure.fields.get("ics_url", "")),
         "poll_seconds": _sentence(request, failure.fields.get("poll_seconds", "")),
-        "ics_authorization_header": _sentence(request, failure.fields.get("ics_authorization_header", "")),
+        "ics_authorization_header": _sentence(
+            request, failure.fields.get("ics_authorization_header", "")
+        ),
         "ics_allow_http": _sentence(request, failure.fields.get("ics_allow_http", "")),
-        "google_calendar_id": _sentence(request, failure.fields.get("google_calendar_id", "")),
+        "google_calendar_id": _sentence(
+            request, failure.fields.get("google_calendar_id", "")
+        ),
     }
 
 
@@ -669,7 +702,9 @@ def _chosen_kind(kind: str) -> str:
     return "private"
 
 
-def _kind_values(form: dict[str, str], kind: str, *, create: bool) -> tuple[dict, SourceFailure | None]:
+def _kind_values(
+    form: dict[str, str], kind: str, *, create: bool
+) -> tuple[dict, SourceFailure | None]:
     if kind == "ics":
         return _ics_values(form, create=create)
     if kind == "google":
@@ -677,7 +712,9 @@ def _kind_values(form: dict[str, str], kind: str, *, create: bool) -> tuple[dict
     return {}, None
 
 
-def _google_values(form: dict[str, str], *, create: bool) -> tuple[dict, SourceFailure | None]:
+def _google_values(
+    form: dict[str, str], *, create: bool
+) -> tuple[dict, SourceFailure | None]:
     raw_poll = form.get("poll_seconds", "")
     if create and raw_poll.strip() == "":
         poll: int | SourceFailure = GOOGLE_POLL_SECONDS
@@ -696,11 +733,15 @@ def _google_connect(found: dict) -> dict | None:
         return None
     return {
         "href": f"/api/oauth/google/start?source_id={found['id']}",
-        "label": "action.reconnect_google" if found.get("google_connected") else "action.connect_google",
+        "label": "action.reconnect_google"
+        if found.get("google_connected")
+        else "action.connect_google",
     }
 
 
-def _ics_values(form: dict[str, str], *, create: bool) -> tuple[dict, SourceFailure | None]:
+def _ics_values(
+    form: dict[str, str], *, create: bool
+) -> tuple[dict, SourceFailure | None]:
     raw_poll = form.get("poll_seconds", "")
     if create and raw_poll.strip() == "":
         poll: int | SourceFailure = DEFAULT_POLL_SECONDS

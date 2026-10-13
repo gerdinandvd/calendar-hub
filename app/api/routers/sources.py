@@ -5,7 +5,8 @@ from fastapi.responses import JSONResponse
 
 from app.access import json_error
 from app.api.schemas.sources import SourceCreate, SourcePatch
-from app.api.services.sources import (
+from app.i18n import english
+from app.services.sources import (
     SourceFailure,
     create_source,
     delete_source,
@@ -16,7 +17,6 @@ from app.api.services.sources import (
     start_sync,
     update_source,
 )
-from app.ui.text import english
 
 router = APIRouter()
 

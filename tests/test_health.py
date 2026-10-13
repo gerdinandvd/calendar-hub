@@ -1,20 +1,20 @@
 """Health endpoint and application lifecycle."""
 
 import re
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from fastapi.testclient import TestClient
 
-from app.api.routers.health import (
+from app.db.models import Base
+from app.db.session import make_engine
+from app.health import (
     KOPIA_ERROR,
     LITESTREAM_ERROR,
     RADICALE_ERROR,
     report,
     write_heartbeat,
 )
-from app.db.models import Base
-from app.db.session import make_engine
 from app.main import create_app
 
 
@@ -87,7 +87,12 @@ def test_backup_scripts_keep_the_hub_key_out() -> None:
     root = Path(__file__).resolve().parents[1] / "deploy"
     text = "\n".join(
         (root / name).read_text(encoding="utf-8")
-        for name in ("litestream-entrypoint.sh", "kopia-entrypoint.sh", "litestream.yml", "kopia.yml")
+        for name in (
+            "litestream-entrypoint.sh",
+            "kopia-entrypoint.sh",
+            "litestream.yml",
+            "kopia.yml",
+        )
     )
     assert "HUB_SECRET_KEY" not in text
     assert "public-read" not in text
@@ -113,7 +118,9 @@ def test_mounted_routes() -> None:
     assert "/health/panel" in paths
 
 
-def test_heartbeat_copies_the_litestream_status_time(tmp_path: Path, monkeypatch) -> None:
+def test_heartbeat_copies_the_litestream_status_time(
+    tmp_path: Path, monkeypatch
+) -> None:
     status = tmp_path / "litestream-sync"
     beat = tmp_path / "litestream-heartbeat"
     status.write_text("2026-10-10T11:00:00Z\n", encoding="utf-8")
@@ -134,7 +141,7 @@ def test_heartbeat_copies_the_litestream_status_time(tmp_path: Path, monkeypatch
 
 
 def _stamp(moment: datetime) -> str:
-    return moment.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return moment.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def _disk_bytes(html: str) -> int:
@@ -159,7 +166,7 @@ def test_health_ages_are_strict(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.delenv("HUB_LITESTREAM_STATUS_PATH", raising=False)
     monkeypatch.setenv("HUB_LITESTREAM_HEARTBEAT_PATH", str(beat))
     monkeypatch.setenv("HUB_KOPIA_STATUS_PATH", str(kopia))
-    moment = datetime(2026, 10, 10, 12, 0, tzinfo=timezone.utc)
+    moment = datetime(2026, 10, 10, 12, 0, tzinfo=UTC)
     beat.write_text("2026-10-10T11:55:00Z\n", encoding="utf-8")
     kopia.write_text("2026-10-10T04:00:00Z\n", encoding="utf-8")
 
@@ -190,7 +197,7 @@ def test_health_page_shows_fresh_and_stale_backups(tmp_path: Path, monkeypatch) 
     monkeypatch.delenv("HUB_LITESTREAM_STATUS_PATH", raising=False)
     monkeypatch.setenv("HUB_LITESTREAM_HEARTBEAT_PATH", str(beat))
     monkeypatch.setenv("HUB_KOPIA_STATUS_PATH", str(kopia))
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     old_beat = _stamp(now - timedelta(minutes=5, seconds=5))
     old_kopia = _stamp(now - timedelta(hours=8, seconds=5))
     beat.write_text(old_beat + "\n", encoding="utf-8")

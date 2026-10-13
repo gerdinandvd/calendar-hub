@@ -9,9 +9,9 @@ from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 
 from app.access import json_error
-from app.ui.text import english
-from app.api.services.sources import get_source, webhook_secret_matches
+from app.i18n import english
 from app.secrets import SecretKeyError
+from app.services.sources import get_source, webhook_secret_matches
 from app.sync.runner import SyncFailed, run_webhook
 from app.sync.webhook import ParseError, parse
 
@@ -70,7 +70,9 @@ async def receive(source_id: str, request: Request) -> dict | JSONResponse:
     except ParseError as exc:
         return json_error(422, "invalid_request", exc.detail)
     try:
-        run_webhook(request.app.state.engine, request.app.state.radicale, source, command)
+        run_webhook(
+            request.app.state.engine, request.app.state.radicale, source, command
+        )
     except SyncFailed as exc:
         return json_error(500, "internal_error", english(exc.message))
     return {"ok": True}
@@ -84,12 +86,16 @@ async def _limited_body(request: Request) -> bytes | JSONResponse:
         except ValueError:
             return json_error(400, "bad_request", "The request is invalid.")
         if declared > MAX_BODY:
-            return json_error(413, "payload_too_large", "The body is larger than 256 KB.")
+            return json_error(
+                413, "payload_too_large", "The body is larger than 256 KB."
+            )
     chunks: list[bytes] = []
     total = 0
     async for chunk in request.stream():
         total += len(chunk)
         if total > MAX_BODY:
-            return json_error(413, "payload_too_large", "The body is larger than 256 KB.")
+            return json_error(
+                413, "payload_too_large", "The body is larger than 256 KB."
+            )
         chunks.append(chunk)
     return b"".join(chunks)

@@ -1,17 +1,21 @@
 """Catalog keys, English API text, and stored sentences."""
 
+from app.i18n import EN, english, present
 from app.sync.apply import CAPACITY_MESSAGE, SAVE_MESSAGE
 from app.sync.google import (
     FETCH_MESSAGE as GOOGLE_FETCH,
+)
+from app.sync.google import (
     NOT_CONFIGURED,
     NOT_CONNECTED,
-    READ_MESSAGE as GOOGLE_READ,
     SCOPE_MESSAGE,
     TOKEN_MESSAGE,
 )
+from app.sync.google import (
+    READ_MESSAGE as GOOGLE_READ,
+)
 from app.sync.ics import FETCH_MESSAGE, READ_MESSAGE, SIZE_MESSAGE, TIMEOUT_MESSAGE
 from app.sync.runner import PROCESS_STOPPED
-from app.ui.text import EN, english, present
 
 _CODES = (
     SAVE_MESSAGE,
@@ -54,11 +58,17 @@ def test_english_renders_keys_and_leaves_unknown_text() -> None:
 
 def test_present_translates_keys_legacy_sentences_and_unknown_text() -> None:
     assert present("en", "sentence.event_saved") == "The event could not be saved."
-    assert present("nl", "sentence.event_saved") == "De afspraak kon niet worden opgeslagen."
+    assert (
+        present("nl", "sentence.event_saved")
+        == "De afspraak kon niet worden opgeslagen."
+    )
     assert present("nl", "sentence.enter_name sentence.timezone") == (
         "Vul een naam in. Vul een geldige tijdzone in."
     )
-    assert present("nl", "The event could not be saved.") == "De afspraak kon niet worden opgeslagen."
+    assert (
+        present("nl", "The event could not be saved.")
+        == "De afspraak kon niet worden opgeslagen."
+    )
     assert present("nl", "Radicale is not reachable.") == "Radicale is niet bereikbaar."
     assert present("nl", "A custom operator note.") == "A custom operator note."
     assert present("en", "") == ""

@@ -4,13 +4,13 @@ import os
 import secrets
 import uuid
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from urllib.parse import quote, urlsplit
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from sqlalchemy import delete, func, select
-from sqlalchemy.exc import IntegrityError
 from sqlalchemy.engine import Engine
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.db.models import EventMapping, Source, SourceSecret, SyncState
@@ -121,7 +121,9 @@ def create_source(
                 return _failure(500, "sentence.secret_key")
     google_ready: _GoogleReady | None = None
     if kind == "google":
-        prepared = _prepare_google(google_calendar_id, poll_seconds, default_calendar=True)
+        prepared = _prepare_google(
+            google_calendar_id, poll_seconds, default_calendar=True
+        )
         if isinstance(prepared, SourceFailure):
             return prepared
         google_ready = prepared
@@ -166,7 +168,9 @@ def create_source(
                 timezone=zone,
                 ics_url=None if ready is None else ready.url,
                 ics_allow_http=0 if ready is None else ready.allow_http,
-                google_calendar_id=None if google_ready is None else google_ready.calendar_id,
+                google_calendar_id=None
+                if google_ready is None
+                else google_ready.calendar_id,
                 created_at=stamp,
                 updated_at=stamp,
             )
@@ -226,10 +230,13 @@ def update_source(
         current_allow = row.ics_allow_http
         current_poll = row.poll_seconds
         current_calendar = row.google_calendar_id
-    ics_change = any(
-        value is not None
-        for value in (ics_url, ics_allow_http, ics_authorization_header)
-    ) or clear_ics_authorization
+    ics_change = (
+        any(
+            value is not None
+            for value in (ics_url, ics_allow_http, ics_authorization_header)
+        )
+        or clear_ics_authorization
+    )
     if ics_change and current_kind != "ics":
         return _failure(422, "sentence.fields_ics")
     if poll_seconds is not None and current_kind not in {"ics", "google"}:
@@ -258,7 +265,9 @@ def update_source(
             except SecretKeyError:
                 return _failure(500, "sentence.secret_key")
     google_ready: _GoogleReady | None = None
-    if current_kind == "google" and (google_calendar_id is not None or poll_seconds is not None):
+    if current_kind == "google" and (
+        google_calendar_id is not None or poll_seconds is not None
+    ):
         prepared = _prepare_google(
             current_calendar if google_calendar_id is None else google_calendar_id,
             current_poll if poll_seconds is None else poll_seconds,
@@ -297,10 +306,17 @@ def update_source(
             drop_cursor = new_zone != current_zone or (
                 ready is not None and ready.url != current_url
             )
-            if google_ready is not None and google_ready.calendar_id != current_calendar:
+            if (
+                google_ready is not None
+                and google_ready.calendar_id != current_calendar
+            ):
                 drop_cursor = True
             if header_action != "keep":
-                _store_header(session, source_id, None if header_action == "clear" else header_cipher)
+                _store_header(
+                    session,
+                    source_id,
+                    None if header_action == "clear" else header_cipher,
+                )
                 drop_cursor = True
             if drop_cursor and row.kind in {"ics", "google"}:
                 state = session.get(SyncState, source_id)
@@ -373,7 +389,9 @@ def get_source(engine: Engine, source_id: str) -> dict | None:
 
 def list_sources(engine: Engine) -> list[dict]:
     with Session(engine) as session:
-        rows = session.scalars(select(Source).order_by(Source.created_at, Source.id)).all()
+        rows = session.scalars(
+            select(Source).order_by(Source.created_at, Source.id)
+        ).all()
         states = _states(session)
         return [
             _public(
@@ -404,7 +422,9 @@ def start_sync(
 
 def list_sync_status(engine: Engine) -> list[dict]:
     with Session(engine) as session:
-        rows = session.scalars(select(Source).order_by(Source.created_at, Source.id)).all()
+        rows = session.scalars(
+            select(Source).order_by(Source.created_at, Source.id)
+        ).all()
         states = _states(session)
         return [_sync_public(row, states.get(row.id)) for row in rows]
 
@@ -545,7 +565,8 @@ def _validate_new(
     if kind not in CREATABLE_KINDS:
         return _failure(422, "sentence.creatable")
     if kind != "ics" and any(
-        value is not None for value in (ics_url, ics_allow_http, ics_authorization_header)
+        value is not None
+        for value in (ics_url, ics_allow_http, ics_authorization_header)
     ):
         return _failure(422, "sentence.fields_ics")
     if kind not in {"ics", "google"} and poll_seconds is not None:
@@ -747,7 +768,9 @@ def _status_code(row: Source, state: SyncState | None) -> str:
     return state.status
 
 
-def _created_poll(ready: _IcsReady | None, google_ready: _GoogleReady | None) -> int | None:
+def _created_poll(
+    ready: _IcsReady | None, google_ready: _GoogleReady | None
+) -> int | None:
     if ready is not None:
         return ready.poll_seconds
     if google_ready is not None:
@@ -841,12 +864,16 @@ def _sync_public(row: Source, state: SyncState | None) -> dict:
         "id": row.id,
         "name": row.name,
         "kind": row.kind,
-        "kind_label": KINDS.get(row.kind, KindInfo(row.color, row.color, row.kind)).label,
+        "kind_label": KINDS.get(
+            row.kind, KindInfo(row.color, row.color, row.kind)
+        ).label,
         "status": status,
         "status_label": STATUS_LABELS[status],
         "last_success_at": None if private or state is None else state.last_success_at,
         "last_error_at": None if private or state is None else state.last_error_at,
-        "last_error_message": None if private or state is None else state.last_error_message,
+        "last_error_message": None
+        if private or state is None
+        else state.last_error_message,
         "events_seen": None if private or state is None else state.events_seen,
         "events_upserted": None if private or state is None else state.events_upserted,
         "events_deleted": None if private or state is None else state.events_deleted,
@@ -854,7 +881,7 @@ def _sync_public(row: Source, state: SyncState | None) -> dict:
 
 
 def _now() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def _drop_collection(radicale: RadicaleClient, path: str) -> None:
@@ -869,3 +896,23 @@ def _restore_name(radicale: RadicaleClient, path: str, name: str, color: str) ->
         radicale.update_properties(path, name, color)
     except RadicaleError:
         return
+
+
+def build_caldav_info(engine: Engine) -> dict:
+    """CalDAV connection details for the owner. No password and no internal account."""
+
+    collections = []
+    for item in list_sources(engine):
+        collections.append(
+            {
+                "name": item["name"],
+                "url": item["collection_url"],
+                "color": item["color"],
+                "color_name": item["color_name"],
+            }
+        )
+    return {
+        "host": os.environ.get("HUB_HOST", "").strip(),
+        "username": os.environ.get("HUB_USER", "").strip(),
+        "collections": collections,
+    }

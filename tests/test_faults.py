@@ -11,12 +11,12 @@ from pathlib import Path
 import test_google as google_tests
 import test_ics as ics_tests
 import test_webhook as webhook_tests
+from app.i18n import english
 from app.radicale.client import RadicaleClient
+from app.sync.apply import SAVE_MESSAGE
 from app.sync.google import FETCH_MESSAGE, READ_MESSAGE, TIMEOUT_SECONDS, _timeout
 from app.sync.ics import TIMEOUT_MESSAGE
-from app.sync.apply import SAVE_MESSAGE
 from app.sync.runner import PROCESS_STOPPED, stop_runs, wait_for
-from app.ui.text import english
 
 
 class _Store:
@@ -33,7 +33,8 @@ def _handler(store: _Store) -> type[BaseHTTPRequestHandler]:
         def do_PROPFIND(self) -> None:
             self._read()
             rows = "".join(
-                f"<D:response><D:href>{path}</D:href></D:response>" for path in store.events
+                f"<D:response><D:href>{path}</D:href></D:response>"
+                for path in store.events
             )
             body = (
                 "<?xml version='1.0' encoding='utf-8'?>"
@@ -95,7 +96,9 @@ def _serve(store: _Store) -> tuple[ThreadingHTTPServer, RadicaleClient]:
     server = ThreadingHTTPServer(("127.0.0.1", 0), _handler(store))
     threading.Thread(target=server.serve_forever, daemon=True).start()
     port = server.server_address[1]
-    client = RadicaleClient(f"http://127.0.0.1:{port}", "internal-account-name", "secret")
+    client = RadicaleClient(
+        f"http://127.0.0.1:{port}", "internal-account-name", "secret"
+    )
     return server, client
 
 
@@ -160,7 +163,9 @@ def test_ics_timeout_does_not_fail_another_source(tmp_path: Path, monkeypatch) -
         assert ics_tests._sync(client, steady["id"]).status_code == 202
         assert wait_for(client.app.state.engine, steady["id"]) == "ok"
         before = ics_tests._state(client.app.state.engine, steady["id"])
-        synced = ics_tests._mappings(client.app.state.engine, steady["id"])[0]["last_synced_at"]
+        synced = ics_tests._mappings(client.app.state.engine, steady["id"])[0][
+            "last_synced_at"
+        ]
         slow = ics_tests._create(client, f"{base}/slow.ics", name="Slow")
         feed.hold = threading.Event()
         monkeypatch.setenv("HUB_ICS_TIMEOUT", "0.2")
@@ -173,7 +178,12 @@ def test_ics_timeout_does_not_fail_another_source(tmp_path: Path, monkeypatch) -
         steady_after = ics_tests._state(client.app.state.engine, steady["id"])
         assert steady_after["status"] == "ok"
         assert steady_after["last_success_at"] == before["last_success_at"]
-        assert ics_tests._mappings(client.app.state.engine, steady["id"])[0]["last_synced_at"] == synced
+        assert (
+            ics_tests._mappings(client.app.state.engine, steady["id"])[0][
+                "last_synced_at"
+            ]
+            == synced
+        )
         assert _sync_row(client, slow["id"])["status"] == "error"
         assert _sync_row(client, steady["id"])["status"] == "ok"
         assert len(fake.events) == 1
@@ -191,14 +201,20 @@ def test_google_timeout_keeps_the_previous_event(tmp_path: Path, monkeypatch) ->
     try:
         work = google_tests._create(client, "Work")
         google_tests._connect(client, work["id"])
-        google.push(*google_tests._page([google_tests._item("keep", "etag-keep")], "token-1"))
+        google.push(
+            *google_tests._page([google_tests._item("keep", "etag-keep")], "token-1")
+        )
         assert google_tests._sync(client, work["id"]).status_code == 202
         assert wait_for(client.app.state.engine, work["id"]) == "ok"
         before = google_tests._state(client.app.state.engine, work["id"])
-        synced = google_tests._mappings(client.app.state.engine, work["id"])[0]["last_synced_at"]
+        synced = google_tests._mappings(client.app.state.engine, work["id"])[0][
+            "last_synced_at"
+        ]
         other = google_tests._create(client, "Other")
         google_tests._connect(client, other["id"])
-        google.push(*google_tests._page([google_tests._item("extra", "etag-extra")], "token-2"))
+        google.push(
+            *google_tests._page([google_tests._item("extra", "etag-extra")], "token-2")
+        )
         google.hold = threading.Event()
         monkeypatch.setenv("HUB_GOOGLE_TIMEOUT", "0.2")
         assert google_tests._sync(client, work["id"]).status_code == 202
@@ -228,11 +244,15 @@ def test_google_parse_error_keeps_the_cursor(tmp_path: Path, monkeypatch) -> Non
     try:
         work = google_tests._create(client, "Work")
         google_tests._connect(client, work["id"])
-        google.push(*google_tests._page([google_tests._item("keep", "etag-keep")], "token-1"))
+        google.push(
+            *google_tests._page([google_tests._item("keep", "etag-keep")], "token-1")
+        )
         assert google_tests._sync(client, work["id"]).status_code == 202
         assert wait_for(client.app.state.engine, work["id"]) == "ok"
         before = google_tests._state(client.app.state.engine, work["id"])
-        synced = google_tests._mappings(client.app.state.engine, work["id"])[0]["last_synced_at"]
+        synced = google_tests._mappings(client.app.state.engine, work["id"])[0][
+            "last_synced_at"
+        ]
         other = google_tests._create(client, "Other")
         google.push(200, {"items": ["bad"], "nextSyncToken": "broken"})
         assert google_tests._sync(client, work["id"]).status_code == 202
@@ -245,7 +265,10 @@ def test_google_parse_error_keeps_the_cursor(tmp_path: Path, monkeypatch) -> Non
         assert [row["external_id"] for row in rows] == ["keep"]
         assert rows[0]["last_synced_at"] == synced
         assert len(fake.events) == 1
-        assert google_tests._state(client.app.state.engine, other["id"])["status"] == "idle"
+        assert (
+            google_tests._state(client.app.state.engine, other["id"])["status"]
+            == "idle"
+        )
     finally:
         google_tests._close(client)
         google_tests._close_server(server)
@@ -263,11 +286,15 @@ def test_stopped_radicale_on_ics_is_a_sentence_without_a_status(
         assert ics_tests._sync(client, created["id"]).status_code == 202
         assert wait_for(client.app.state.engine, created["id"]) == "ok"
         before = ics_tests._state(client.app.state.engine, created["id"])
-        synced = ics_tests._mappings(client.app.state.engine, created["id"])[0]["last_synced_at"]
+        synced = ics_tests._mappings(client.app.state.engine, created["id"])[0][
+            "last_synced_at"
+        ]
         saved = dict(fake.events)
         _swap(client, _closed_client())
         feed.etag = '"again"'
-        feed.default = ics_tests._calendar(*ics_tests._event("keep"), *ics_tests._event("next"))
+        feed.default = ics_tests._calendar(
+            *ics_tests._event("keep"), *ics_tests._event("next")
+        )
         with caplog.at_level(logging.INFO, logger="app"):
             assert ics_tests._sync(client, created["id"]).status_code == 202
             assert wait_for(client.app.state.engine, created["id"]) == "error"
@@ -276,7 +303,12 @@ def test_stopped_radicale_on_ics_is_a_sentence_without_a_status(
         assert "status=" not in failed["last_error_message"]
         assert failed["cursor"] == before["cursor"]
         assert failed["last_success_at"] == before["last_success_at"]
-        assert ics_tests._mappings(client.app.state.engine, created["id"])[0]["last_synced_at"] == synced
+        assert (
+            ics_tests._mappings(client.app.state.engine, created["id"])[0][
+                "last_synced_at"
+            ]
+            == synced
+        )
         assert fake.events == saved
         assert "radicale_error method=PROPFIND status=none" in caplog.text
         assert re.search(r"status=\d{3}", caplog.text) is None
@@ -286,20 +318,28 @@ def test_stopped_radicale_on_ics_is_a_sentence_without_a_status(
         ics_tests._close_server(server)
 
 
-def test_stopped_radicale_on_google_keeps_the_event(tmp_path: Path, monkeypatch, caplog) -> None:
+def test_stopped_radicale_on_google_keeps_the_event(
+    tmp_path: Path, monkeypatch, caplog
+) -> None:
     google = google_tests.FakeGoogle()
     server, base = google_tests._server(google)
     client, fake = google_tests._open(tmp_path, monkeypatch, base)
     try:
         work = google_tests._create(client, "Work")
         google_tests._connect(client, work["id"])
-        google.push(*google_tests._page([google_tests._item("keep", "etag-keep")], "token-1"))
+        google.push(
+            *google_tests._page([google_tests._item("keep", "etag-keep")], "token-1")
+        )
         assert google_tests._sync(client, work["id"]).status_code == 202
         assert wait_for(client.app.state.engine, work["id"]) == "ok"
         before = google_tests._state(client.app.state.engine, work["id"])
-        synced = google_tests._mappings(client.app.state.engine, work["id"])[0]["last_synced_at"]
+        synced = google_tests._mappings(client.app.state.engine, work["id"])[0][
+            "last_synced_at"
+        ]
         saved = dict(fake.events)
-        google.push(*google_tests._page([google_tests._item("extra", "etag-extra")], "token-2"))
+        google.push(
+            *google_tests._page([google_tests._item("extra", "etag-extra")], "token-2")
+        )
         _swap(client, _closed_client())
         with caplog.at_level(logging.INFO, logger="app"):
             assert google_tests._sync(client, work["id"]).status_code == 202
@@ -320,14 +360,23 @@ def test_stopped_radicale_on_google_keeps_the_event(tmp_path: Path, monkeypatch,
         google_tests._close_server(server)
 
 
-def test_stopped_radicale_on_webhook_keeps_the_event(tmp_path: Path, monkeypatch, caplog) -> None:
+def test_stopped_radicale_on_webhook_keeps_the_event(
+    tmp_path: Path, monkeypatch, caplog
+) -> None:
     client, fake = webhook_tests._open(tmp_path, monkeypatch)
     try:
         created = webhook_tests._webhook(client, "Hook")
         secret = webhook_tests._plain_secret(client.app.state.engine, created["id"])
-        assert webhook_tests._send(client, created["id"], secret, webhook_tests._payload()).status_code == 200
+        assert (
+            webhook_tests._send(
+                client, created["id"], secret, webhook_tests._payload()
+            ).status_code
+            == 200
+        )
         success = webhook_tests._state(client.app.state.engine, created["id"])
-        synced = webhook_tests._mappings(client.app.state.engine, created["id"])[0]["last_synced_at"]
+        synced = webhook_tests._mappings(client.app.state.engine, created["id"])[0][
+            "last_synced_at"
+        ]
         saved = dict(fake.events)
         _swap(client, _closed_client())
         with caplog.at_level(logging.INFO, logger="app"):
@@ -360,15 +409,22 @@ def test_google_process_stop_keeps_the_event(tmp_path: Path, monkeypatch) -> Non
     try:
         work = google_tests._create(client, "Work")
         google_tests._connect(client, work["id"])
-        google.push(*google_tests._page([google_tests._item("keep", "etag-keep")], "token-1"))
+        google.push(
+            *google_tests._page([google_tests._item("keep", "etag-keep")], "token-1")
+        )
         assert google_tests._sync(client, work["id"]).status_code == 202
         assert wait_for(client.app.state.engine, work["id"]) == "ok"
         before = google_tests._state(client.app.state.engine, work["id"])
-        synced = google_tests._mappings(client.app.state.engine, work["id"])[0]["last_synced_at"]
+        synced = google_tests._mappings(client.app.state.engine, work["id"])[0][
+            "last_synced_at"
+        ]
         google.hold = threading.Event()
         google.push(
             *google_tests._page(
-                [google_tests._item("keep", "etag-keep"), google_tests._item("extra", "etag-extra")],
+                [
+                    google_tests._item("keep", "etag-keep"),
+                    google_tests._item("extra", "etag-extra"),
+                ],
                 "token-2",
             )
         )
@@ -376,7 +432,10 @@ def test_google_process_stop_keeps_the_event(tmp_path: Path, monkeypatch) -> Non
         assert google_tests._sync(client, work["id"]).status_code == 202
         deadline = time.monotonic() + 2
         while time.monotonic() < deadline:
-            if any(item["path"].startswith("/calendars/") for item in google.requests[seen:]):
+            if any(
+                item["path"].startswith("/calendars/")
+                for item in google.requests[seen:]
+            ):
                 break
             time.sleep(0.01)
         stop_runs(client.app.state.engine, timeout=0.05)
@@ -405,8 +464,15 @@ def test_webhook_process_stop_keeps_the_event(tmp_path: Path, monkeypatch) -> No
     try:
         created = webhook_tests._webhook(client, "Hook")
         secret = webhook_tests._plain_secret(client.app.state.engine, created["id"])
-        assert webhook_tests._send(client, created["id"], secret, webhook_tests._payload()).status_code == 200
-        synced = webhook_tests._mappings(client.app.state.engine, created["id"])[0]["last_synced_at"]
+        assert (
+            webhook_tests._send(
+                client, created["id"], secret, webhook_tests._payload()
+            ).status_code
+            == 200
+        )
+        synced = webhook_tests._mappings(client.app.state.engine, created["id"])[0][
+            "last_synced_at"
+        ]
         kept = dict(fake.events)
         gate = threading.Event()
         fake.block_put = gate
@@ -430,14 +496,21 @@ def test_webhook_process_stop_keeps_the_event(tmp_path: Path, monkeypatch) -> No
         assert box["response"].json()["detail"] == english(PROCESS_STOPPED)
         for path, body in kept.items():
             assert fake.events[path] == body
-        assert webhook_tests._mappings(client.app.state.engine, created["id"])[0]["last_synced_at"] == synced
+        assert (
+            webhook_tests._mappings(client.app.state.engine, created["id"])[0][
+                "last_synced_at"
+            ]
+            == synced
+        )
     finally:
         if fake.block_put is not None:
             fake.block_put.set()
         webhook_tests._close(client)
 
 
-def test_failed_etag_retry_on_ics_keeps_the_first_write(tmp_path: Path, monkeypatch, caplog) -> None:
+def test_failed_etag_retry_on_ics_keeps_the_first_write(
+    tmp_path: Path, monkeypatch, caplog
+) -> None:
     feed = ics_tests.Feed()
     server, base = ics_tests._server(feed)
     client, fake = ics_tests._open(tmp_path, monkeypatch)
@@ -448,12 +521,16 @@ def test_failed_etag_retry_on_ics_keeps_the_first_write(tmp_path: Path, monkeypa
         assert ics_tests._sync(client, created["id"]).status_code == 202
         assert wait_for(client.app.state.engine, created["id"]) == "ok"
         before = ics_tests._state(client.app.state.engine, created["id"])
-        synced = ics_tests._mappings(client.app.state.engine, created["id"])[0]["last_synced_at"]
+        synced = ics_tests._mappings(client.app.state.engine, created["id"])[0][
+            "last_synced_at"
+        ]
         store = _Store(fake.events, accept=1)
         caldav, radicale = _serve(store)
         _swap(client, radicale)
         feed.etag = '"next"'
-        feed.default = ics_tests._calendar(*ics_tests._event("added"), *ics_tests._event("blocked"))
+        feed.default = ics_tests._calendar(
+            *ics_tests._event("added"), *ics_tests._event("blocked")
+        )
         with caplog.at_level(logging.INFO, logger="app"):
             assert ics_tests._sync(client, created["id"]).status_code == 202
             assert wait_for(client.app.state.engine, created["id"]) == "error"
@@ -461,7 +538,10 @@ def test_failed_etag_retry_on_ics_keeps_the_first_write(tmp_path: Path, monkeypa
         assert failed["last_error_message"] == SAVE_MESSAGE
         assert failed["cursor"] == before["cursor"]
         assert failed["last_success_at"] == before["last_success_at"]
-        rows = {row["external_id"]: row for row in ics_tests._mappings(client.app.state.engine, created["id"])}
+        rows = {
+            row["external_id"]: row
+            for row in ics_tests._mappings(client.app.state.engine, created["id"])
+        }
         assert rows["keep"]["last_synced_at"] == synced
         assert "added" in rows
         assert "blocked" not in rows
@@ -479,7 +559,9 @@ def test_failed_etag_retry_on_ics_keeps_the_first_write(tmp_path: Path, monkeypa
         ics_tests._close_server(server)
 
 
-def test_failed_etag_retry_on_google_keeps_the_first_write(tmp_path: Path, monkeypatch, caplog) -> None:
+def test_failed_etag_retry_on_google_keeps_the_first_write(
+    tmp_path: Path, monkeypatch, caplog
+) -> None:
     google = google_tests.FakeGoogle()
     server, base = google_tests._server(google)
     client, fake = google_tests._open(tmp_path, monkeypatch, base)
@@ -487,17 +569,24 @@ def test_failed_etag_retry_on_google_keeps_the_first_write(tmp_path: Path, monke
     try:
         work = google_tests._create(client, "Work")
         google_tests._connect(client, work["id"])
-        google.push(*google_tests._page([google_tests._item("keep", "etag-keep")], "token-1"))
+        google.push(
+            *google_tests._page([google_tests._item("keep", "etag-keep")], "token-1")
+        )
         assert google_tests._sync(client, work["id"]).status_code == 202
         assert wait_for(client.app.state.engine, work["id"]) == "ok"
         before = google_tests._state(client.app.state.engine, work["id"])
-        synced = google_tests._mappings(client.app.state.engine, work["id"])[0]["last_synced_at"]
+        synced = google_tests._mappings(client.app.state.engine, work["id"])[0][
+            "last_synced_at"
+        ]
         store = _Store(fake.events, accept=1)
         caldav, radicale = _serve(store)
         _swap(client, radicale)
         google.push(
             *google_tests._page(
-                [google_tests._item("added", "etag-added"), google_tests._item("blocked", "etag-blocked")],
+                [
+                    google_tests._item("added", "etag-added"),
+                    google_tests._item("blocked", "etag-blocked"),
+                ],
                 "token-2",
             )
         )
@@ -508,7 +597,10 @@ def test_failed_etag_retry_on_google_keeps_the_first_write(tmp_path: Path, monke
         assert failed["last_error_message"] == SAVE_MESSAGE
         assert failed["cursor"] == before["cursor"]
         assert failed["last_success_at"] == before["last_success_at"]
-        rows = {row["external_id"]: row for row in google_tests._mappings(client.app.state.engine, work["id"])}
+        rows = {
+            row["external_id"]: row
+            for row in google_tests._mappings(client.app.state.engine, work["id"])
+        }
         assert rows["keep"]["last_synced_at"] == synced
         assert "added" in rows
         assert "blocked" not in rows
@@ -523,15 +615,24 @@ def test_failed_etag_retry_on_google_keeps_the_first_write(tmp_path: Path, monke
         google_tests._close_server(server)
 
 
-def test_failed_etag_retry_on_webhook_keeps_the_event(tmp_path: Path, monkeypatch, caplog) -> None:
+def test_failed_etag_retry_on_webhook_keeps_the_event(
+    tmp_path: Path, monkeypatch, caplog
+) -> None:
     client, fake = webhook_tests._open(tmp_path, monkeypatch)
     caldav = None
     try:
         created = webhook_tests._webhook(client, "Hook")
         secret = webhook_tests._plain_secret(client.app.state.engine, created["id"])
-        assert webhook_tests._send(client, created["id"], secret, webhook_tests._payload()).status_code == 200
+        assert (
+            webhook_tests._send(
+                client, created["id"], secret, webhook_tests._payload()
+            ).status_code
+            == 200
+        )
         success = webhook_tests._state(client.app.state.engine, created["id"])
-        synced = webhook_tests._mappings(client.app.state.engine, created["id"])[0]["last_synced_at"]
+        synced = webhook_tests._mappings(client.app.state.engine, created["id"])[0][
+            "last_synced_at"
+        ]
         store = _Store(fake.events, accept=0)
         caldav, radicale = _serve(store)
         _swap(client, radicale)

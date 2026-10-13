@@ -1,4 +1,4 @@
-"""UI phrases. English is the default; Dutch is the second catalog."""
+"""Shared phrases. English is the default; Dutch is the second catalog."""
 
 EN = {
     "brand": "Calendar hub",
