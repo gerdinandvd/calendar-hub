@@ -1,4 +1,9 @@
-"""Guards the module boundaries from the design."""
+"""Guards the module boundaries from the design.
+
+Import-graph checks below are stopgaps until Import Linter owns those
+contracts (see docs/python-toolchain-responsibilities.md). Drop them then;
+keep content/layout invariants such as the VEVENT marker rule.
+"""
 
 import ast
 from pathlib import Path
@@ -122,6 +127,28 @@ def test_ui_and_admin_do_not_import_isolated_modules() -> None:
     )
     assert _matches(imported, ISOLATED) == []
     assert list((APP / "admin").rglob("*.py")) == []
+
+
+def test_ui_does_not_import_api_routers() -> None:
+    pages = APP / "ui" / "pages.py"
+    imported = resolve_imports(
+        pages.read_text(encoding="utf-8"),
+        "app.ui.pages",
+        False,
+    )
+    assert _matches(imported, frozenset({"app.api.routers"})) == []
+
+
+def test_api_routers_do_not_import_ui() -> None:
+    routers = APP / "api" / "routers"
+    violations: list[str] = []
+    for path in sorted(routers.glob("*.py")):
+        module, is_package = _module_of(path)
+        imported = resolve_imports(path.read_text(encoding="utf-8"), module, is_package)
+        hits = _matches(imported, frozenset({"app.ui"}))
+        if hits:
+            violations.append(f"{module} imports {', '.join(hits)}")
+    assert violations == []
 
 
 def test_vevent_marker_only_allowed_in_ical() -> None:
