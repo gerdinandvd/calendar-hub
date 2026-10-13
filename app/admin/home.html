@@ -2,7 +2,7 @@
 {% block main %}
 <h1>{{ t('brand') }}</h1>
 {% if notice %}
-<div id="form-error" role="alert">{{ notice }}</div>
+<div id="form-notice" tabindex="-1" role="status">{{ notice }}</div>
 {% endif %}
 <p>{{ t('home.intro') }}</p>
 {% if not sources %}

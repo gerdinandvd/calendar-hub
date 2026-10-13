@@ -1,7 +1,7 @@
 <div id="source-main">
   <h1>{{ heading }}</h1>
   {% if notice %}
-  <div id="form-error" tabindex="-1" role="alert">{{ notice }}</div>
+  <div id="form-notice" tabindex="-1" role="status">{{ notice }}</div>
   {% elif banner %}
   <div id="form-error" tabindex="-1" role="alert">{{ banner }}</div>
   {% endif %}

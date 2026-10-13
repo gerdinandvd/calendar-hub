@@ -7,7 +7,7 @@
   <link rel="stylesheet" href="/app.css">
   <script src="/htmx.min.js"></script>
 </head>
-<body hx-on:htmx:after-settle="var node = document.getElementById('form-error'); if (node) node.focus();">
+<body hx-on:htmx:after-settle="var node = document.getElementById('form-error') || document.getElementById('form-notice'); if (node) node.focus();">
   <header>
     <p class="brand">{{ t('brand') }}</p>
     <nav>

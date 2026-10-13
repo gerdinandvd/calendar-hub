@@ -223,6 +223,7 @@ def test_admin_pages_and_field_errors(tmp_path: Path, monkeypatch) -> None:
         assert "Sync now" not in home.text
         assert (
             "hx-on:htmx:after-settle=\"var node = document.getElementById('form-error')"
+            " || document.getElementById('form-notice'); if (node) node.focus();\""
             in home.text
         )
         assert 'href="/?lang=en"' in home.text

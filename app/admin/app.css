@@ -4,6 +4,10 @@
   --background: #eee9de;
   --gold: #b69968;
   --muted: #6c685f;
+
+  /* afgeleid van de achtergrond */
+  --surface: #f6f2e9;
+  --rule: #d9d1bf;
 }
 
 body {
@@ -43,7 +47,7 @@ nav {
 nav a[aria-current="page"] {
   color: var(--primary);
   font-weight: 600;
-  text-decoration-color: var(--gold);
+  text-decoration-color: currentColor;
   text-decoration-thickness: 2px;
   text-underline-offset: 0.2em;
 }
@@ -93,7 +97,7 @@ input {
   box-sizing: border-box;
   padding: 0.35rem 0.5rem;
   color: var(--primary);
-  background: var(--background);
+  background: var(--surface);
   border: 1px solid var(--muted);
   border-radius: 0.25rem;
 }
@@ -105,9 +109,23 @@ input[type="checkbox"] {
   accent-color: var(--accent);
 }
 
+input[aria-invalid="true"] {
+  border-color: var(--accent);
+}
+
 button,
 a {
   color: var(--accent);
+}
+
+a:hover {
+  color: var(--primary);
+  text-decoration-thickness: 2px;
+}
+
+a:active {
+  color: var(--primary);
+  text-decoration-thickness: 2px;
 }
 
 button {
@@ -119,10 +137,22 @@ button {
   cursor: pointer;
 }
 
-button:hover {
-  color: var(--primary);
-  background: var(--gold);
-  border-color: var(--gold);
+button:hover:not(:disabled) {
+  color: var(--background);
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+button:active:not(:disabled) {
+  color: var(--background);
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+button:disabled {
+  color: var(--muted);
+  border-color: var(--muted);
+  cursor: not-allowed;
 }
 
 td button,
@@ -149,7 +179,7 @@ td {
   text-align: left;
   padding: 0.45rem 0.75rem 0.45rem 0;
   vertical-align: top;
-  border-bottom: 1px solid var(--gold);
+  border-bottom: 1px solid var(--rule);
 }
 
 th {
@@ -186,18 +216,25 @@ input + p {
 [id$="-error"] {
   color: var(--accent);
   font-weight: 600;
+  padding-left: 0.6rem;
+  border-left: 3px solid var(--accent);
 }
 
+#form-notice,
 #source-saved {
   margin-left: 0;
   padding-left: 0.6rem;
   border-left: 3px solid var(--gold);
 }
 
+#form-notice {
+  font-weight: 600;
+}
+
 dialog {
   color: var(--primary);
-  background: var(--background);
-  border: 1px solid var(--gold);
+  background: var(--surface);
+  border: 1px solid var(--rule);
   max-width: 28rem;
   padding: 1rem;
 }
