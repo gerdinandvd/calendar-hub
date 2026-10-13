@@ -126,18 +126,17 @@ ignore_imports = [
 ]
 
 [[tool.importlinter.contracts]]
-name = "UI must not import sync importers or Radicale client"
+name = "UI and API must not import sync or Radicale"
 type = "forbidden"
 source_modules = [
     "app.ui",
+    "app.api",
 ]
 forbidden_modules = [
-    "app.sync.google",
-    "app.sync.ics",
-    "app.sync.webhook",
-    "app.radicale.client",
+    "app.sync",
+    "app.radicale",
 ]
-# UI may reach sync/Radicale only via services/health; direct imports are banned.
+# Presentation reaches sync/Radicale only via services/health; direct imports are banned.
 allow_indirect_imports = true
 
 [[tool.importlinter.contracts]]

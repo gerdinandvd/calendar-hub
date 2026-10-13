@@ -26,7 +26,7 @@ def read_sources(request: Request) -> dict:
     return {"sources": list_sources(request.app.state.engine)}
 
 
-@router.post("/api/sources", status_code=201)
+@router.post("/api/sources", status_code=201, response_model=None)
 def post_source(body: SourceCreate, request: Request) -> dict | JSONResponse:
     result = create_source(
         request.app.state.engine,
@@ -44,7 +44,7 @@ def post_source(body: SourceCreate, request: Request) -> dict | JSONResponse:
     return _json(result)
 
 
-@router.get("/api/sources/{source_id}")
+@router.get("/api/sources/{source_id}", response_model=None)
 def read_source(source_id: str, request: Request) -> dict | JSONResponse:
     found = get_source(request.app.state.engine, source_id)
     if found is None:
@@ -52,7 +52,7 @@ def read_source(source_id: str, request: Request) -> dict | JSONResponse:
     return found
 
 
-@router.patch("/api/sources/{source_id}")
+@router.patch("/api/sources/{source_id}", response_model=None)
 def patch_source(
     source_id: str, body: SourcePatch, request: Request
 ) -> dict | JSONResponse:
@@ -81,13 +81,13 @@ def post_sync(source_id: str, request: Request) -> dict | JSONResponse:
     return JSONResponse(result, status_code=202)
 
 
-@router.post("/api/sources/{source_id}/rotate-secret")
+@router.post("/api/sources/{source_id}/rotate-secret", response_model=None)
 def rotate_secret(source_id: str, request: Request) -> dict | JSONResponse:
     result = rotate_webhook_secret(request.app.state.engine, source_id, reveal=False)
     return _json(result)
 
 
-@router.delete("/api/sources/{source_id}")
+@router.delete("/api/sources/{source_id}", response_model=None)
 def remove_source(
     source_id: str, request: Request, confirm: bool = False
 ) -> dict | JSONResponse:

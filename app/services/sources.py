@@ -17,8 +17,11 @@ from app.db.models import EventMapping, Source, SourceSecret, SyncState
 from app.log import log_mutation
 from app.radicale.client import RadicaleClient, RadicaleError
 from app.secrets import SecretKeyError, decrypt, encrypt, equal
-from app.sync.runner import SlotBusy, SyncRejected
+from app.sync import google
+from app.sync.google import store_tokens
+from app.sync.runner import SlotBusy, SyncFailed, SyncRejected, run_webhook
 from app.sync.runner import start_sync as launch_sync
+from app.sync.webhook import ParseError, parse
 
 MAX_SOURCES = 20
 DEFAULT_TIMEZONE = "Europe/Amsterdam"
@@ -55,6 +58,23 @@ class SourceFailure:
     error: str
     detail: str
     fields: dict[str, str] = field(default_factory=dict)
+
+
+class WebhookPayloadError(Exception):
+    def __init__(self, detail: str) -> None:
+        self.detail = detail
+
+
+class WebhookApplyError(Exception):
+    def __init__(self, message: str) -> None:
+        self.message = message
+
+
+class GoogleConnectError(Exception):
+    """OAuth connect failed. reason is config, scope, or token."""
+
+    def __init__(self, reason: str) -> None:
+        self.reason = reason
 
 
 @dataclass(frozen=True)
@@ -418,6 +438,59 @@ def start_sync(
     except SyncRejected as exc:
         return _failure(exc.status, exc.detail, error=exc.error)
     return {"status": "running"}
+
+
+def apply_webhook_payload(
+    engine: Engine,
+    radicale: RadicaleClient,
+    source: dict,
+    payload: object,
+) -> None:
+    """Parse a webhook body and apply it. Raises WebhookPayloadError or WebhookApplyError."""
+
+    try:
+        command = parse(payload, source["timezone"])
+    except ParseError as exc:
+        raise WebhookPayloadError(exc.detail) from None
+    try:
+        run_webhook(engine, radicale, source, command)
+    except SyncFailed as exc:
+        raise WebhookApplyError(exc.message) from None
+
+
+def google_callback_uri() -> str:
+    host = os.environ.get("HUB_HOST", "").strip()
+    client = os.environ.get("HUB_GOOGLE_CLIENT_ID", "").strip()
+    secret = os.environ.get("HUB_GOOGLE_CLIENT_SECRET", "").strip()
+    if not host or not client or not secret:
+        raise GoogleConnectError("config")
+    return f"https://{host}/api/oauth/google/callback"
+
+
+def google_authorization_url(*, state: str) -> str:
+    try:
+        return google.authorization_url(
+            state=state,
+            redirect_uri=google_callback_uri(),
+        )
+    except google.GoogleError as exc:
+        if exc.message == google.NOT_CONFIGURED:
+            raise GoogleConnectError("config") from None
+        raise GoogleConnectError("token") from None
+
+
+def connect_google_source(engine: Engine, source_id: str, *, code: str) -> None:
+    try:
+        redirect_uri = google_callback_uri()
+        bundle = google.exchange_code(code=code, redirect_uri=redirect_uri)
+        store_tokens(engine, source_id, bundle)
+    except GoogleConnectError:
+        raise
+    except google.ScopeRejected:
+        raise GoogleConnectError("scope") from None
+    except (google.GoogleError, SecretKeyError):
+        raise GoogleConnectError("token") from None
+    log_mutation(actor="owner", source_id=source_id, message="connected google source")
 
 
 def list_sync_status(engine: Engine) -> list[dict]:

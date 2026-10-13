@@ -11,9 +11,13 @@ from fastapi.responses import JSONResponse
 from app.access import json_error
 from app.i18n import english
 from app.secrets import SecretKeyError
-from app.services.sources import get_source, webhook_secret_matches
-from app.sync.runner import SyncFailed, run_webhook
-from app.sync.webhook import ParseError, parse
+from app.services.sources import (
+    WebhookApplyError,
+    WebhookPayloadError,
+    apply_webhook_payload,
+    get_source,
+    webhook_secret_matches,
+)
 
 router = APIRouter()
 
@@ -66,14 +70,12 @@ async def receive(source_id: str, request: Request) -> dict | JSONResponse:
     except json.JSONDecodeError:
         return json_error(422, "invalid_request", "The input is invalid.")
     try:
-        command = parse(payload, source["timezone"])
-    except ParseError as exc:
-        return json_error(422, "invalid_request", exc.detail)
-    try:
-        run_webhook(
-            request.app.state.engine, request.app.state.radicale, source, command
+        apply_webhook_payload(
+            request.app.state.engine, request.app.state.radicale, source, payload
         )
-    except SyncFailed as exc:
+    except WebhookPayloadError as exc:
+        return json_error(422, "invalid_request", exc.detail)
+    except WebhookApplyError as exc:
         return json_error(500, "internal_error", english(exc.message))
     return {"ok": True}
 

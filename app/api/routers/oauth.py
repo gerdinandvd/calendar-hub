@@ -1,20 +1,19 @@
 """Google OAuth start and callback. The callback is public and uses a one-time state."""
 
-import os
 import secrets
 import threading
 import time
 
 from fastapi import APIRouter, Request
 from fastapi.responses import RedirectResponse, Response
-from sqlalchemy.orm import Session
 
 from app.access import json_error
-from app.db.models import Source
-from app.log import log_mutation
-from app.secrets import SecretKeyError
-from app.sync import google
-from app.sync.google import store_tokens
+from app.services.sources import (
+    GoogleConnectError,
+    connect_google_source,
+    get_source,
+    google_authorization_url,
+)
 
 router = APIRouter()
 
@@ -55,34 +54,18 @@ def _states(request: Request) -> OAuthStates:
     return states
 
 
-def _callback_uri() -> str:
-    host = os.environ.get("HUB_HOST", "").strip()
-    client = os.environ.get("HUB_GOOGLE_CLIENT_ID", "").strip()
-    secret = os.environ.get("HUB_GOOGLE_CLIENT_SECRET", "").strip()
-    if not host or not client or not secret:
-        raise google.GoogleError(google.NOT_CONFIGURED)
-    return f"https://{host}/api/oauth/google/callback"
-
-
 @router.get("/api/oauth/google/start")
 def start_google(source_id: str, request: Request) -> Response:
-    engine = request.app.state.engine
-    with Session(engine) as session:
-        row = session.get(Source, source_id)
-        kind = None if row is None else row.kind
-    if kind is None:
+    source = get_source(request.app.state.engine, source_id)
+    if source is None:
         return json_error(404, "not_found", "Not found.")
-    if kind != "google":
+    if source["kind"] != "google":
         return json_error(
             422, "invalid_request", "Those fields are only for a Google source."
         )
     try:
-        redirect_uri = _callback_uri()
-        url = google.authorization_url(
-            state=_states(request).issue(source_id),
-            redirect_uri=redirect_uri,
-        )
-    except google.GoogleError:
+        url = google_authorization_url(state=_states(request).issue(source_id))
+    except GoogleConnectError:
         return RedirectResponse(f"/sources/{source_id}?google=config", status_code=302)
     return RedirectResponse(url, status_code=302)
 
@@ -99,23 +82,15 @@ def google_callback(
         return RedirectResponse("/?google=state", status_code=302)
     if error or not code:
         return RedirectResponse(f"/sources/{source_id}?google=state", status_code=302)
-    engine = request.app.state.engine
-    with Session(engine) as session:
-        row = session.get(Source, source_id)
-        kind = None if row is None else row.kind
-    if kind is None:
+    source = get_source(request.app.state.engine, source_id)
+    if source is None:
         return RedirectResponse("/?google=state", status_code=302)
-    if kind != "google":
+    if source["kind"] != "google":
         return RedirectResponse(f"/sources/{source_id}?google=state", status_code=302)
     try:
-        bundle = google.exchange_code(code=code, redirect_uri=_callback_uri())
-    except google.ScopeRejected:
-        return RedirectResponse(f"/sources/{source_id}?google=scope", status_code=302)
-    except google.GoogleError:
-        return RedirectResponse(f"/sources/{source_id}?google=token", status_code=302)
-    try:
-        store_tokens(engine, source_id, bundle)
-    except SecretKeyError:
-        return RedirectResponse(f"/sources/{source_id}?google=token", status_code=302)
-    log_mutation(actor="owner", source_id=source_id, message="connected google source")
+        connect_google_source(request.app.state.engine, source_id, code=code)
+    except GoogleConnectError as exc:
+        return RedirectResponse(
+            f"/sources/{source_id}?google={exc.reason}", status_code=302
+        )
     return RedirectResponse(f"/sources/{source_id}", status_code=302)
