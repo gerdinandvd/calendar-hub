@@ -6,9 +6,7 @@ import re
 ACTORS = frozenset({"owner", "scheduler", "webhook"})
 
 _VALUE = r"(?:\"[^\"]*\"|'[^']*'|\S+)"
-_AUTHORIZATION = re.compile(
-    rf"(?i)\bauthorization\b\s*[:=]\s*(?:basic\s+)?{_VALUE}"
-)
+_AUTHORIZATION = re.compile(rf"(?i)\bauthorization\b\s*[:=]\s*(?:basic\s+)?{_VALUE}")
 _ASSIGNED = re.compile(
     rf"(?i)\b(?:password|token|secret|webhook_secret|refresh_token|"
     rf"access_token|summary|description|location|title|titel)\b\s*[:=]\s*{_VALUE}"

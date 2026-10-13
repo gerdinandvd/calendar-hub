@@ -3,11 +3,11 @@
 import json
 import os
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
+from urllib.parse import urlencode
 
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session
-from urllib.parse import urlencode
 
 from app.db.models import SourceSecret
 from app.secrets import decrypt, encrypt
@@ -69,7 +69,9 @@ def authorization_url(*, state: str, redirect_uri: str) -> str:
     return f"{base}{separator}{query}"
 
 
-def exchange_code(*, code: str, redirect_uri: str, now: datetime | None = None) -> TokenBundle:
+def exchange_code(
+    *, code: str, redirect_uri: str, now: datetime | None = None
+) -> TokenBundle:
     _configured()
     if not code or any(char in code for char in "\r\n") or len(code) > 2048:
         raise GoogleError(TOKEN_MESSAGE)
@@ -82,7 +84,9 @@ def exchange_code(*, code: str, redirect_uri: str, now: datetime | None = None) 
             "grant_type": "authorization_code",
         }
     ).encode("utf-8")
-    status, payload = json_request("POST", _token_url(), body, TOKEN_MESSAGE, _form_headers())
+    status, payload = json_request(
+        "POST", _token_url(), body, TOKEN_MESSAGE, _form_headers()
+    )
     return _bundle(status, payload, now, previous_refresh=None, require_refresh=True)
 
 
@@ -98,8 +102,16 @@ def refresh_if_needed(tokens: TokenBundle, now: datetime) -> TokenBundle:
             "grant_type": "refresh_token",
         }
     ).encode("utf-8")
-    status, payload = json_request("POST", _token_url(), body, TOKEN_MESSAGE, _form_headers())
-    return _bundle(status, payload, now, previous_refresh=tokens.refresh_token, require_refresh=True)
+    status, payload = json_request(
+        "POST", _token_url(), body, TOKEN_MESSAGE, _form_headers()
+    )
+    return _bundle(
+        status,
+        payload,
+        now,
+        previous_refresh=tokens.refresh_token,
+        require_refresh=True,
+    )
 
 
 def load_tokens(engine: Engine, source_id: str) -> TokenBundle | None:
@@ -221,18 +233,26 @@ def _bundle(
     if not _readonly_scope(scope if isinstance(scope, str) else None):
         raise ScopeRejected()
     access = payload.get("access_token")
-    if not isinstance(access, str) or not access or any(char in access for char in "\r\n"):
+    if (
+        not isinstance(access, str)
+        or not access
+        or any(char in access for char in "\r\n")
+    ):
         raise GoogleError(TOKEN_MESSAGE)
     refresh = payload.get("refresh_token")
     if refresh is None:
         refresh = previous_refresh
-    elif not isinstance(refresh, str) or not refresh or any(char in refresh for char in "\r\n"):
+    elif (
+        not isinstance(refresh, str)
+        or not refresh
+        or any(char in refresh for char in "\r\n")
+    ):
         raise GoogleError(TOKEN_MESSAGE)
     if not isinstance(refresh, str) or (require_refresh and not refresh):
         raise GoogleError(TOKEN_MESSAGE)
-    expiry = (_utc(now) + timedelta(seconds=_expires_in(payload.get("expires_in")))).strftime(
-        "%Y-%m-%dT%H:%M:%SZ"
-    )
+    expiry = (
+        _utc(now) + timedelta(seconds=_expires_in(payload.get("expires_in")))
+    ).strftime("%Y-%m-%dT%H:%M:%SZ")
     return TokenBundle(refresh_token=refresh, access_token=access, expiry=expiry)
 
 
@@ -240,15 +260,21 @@ def _due(tokens: TokenBundle, now: datetime) -> bool:
     if not tokens.access_token:
         return True
     try:
-        expiry = datetime.strptime(tokens.expiry, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+        expiry = datetime.strptime(tokens.expiry, "%Y-%m-%dT%H:%M:%SZ").replace(
+            tzinfo=UTC
+        )
     except ValueError:
         return True
     return expiry <= now + timedelta(seconds=REFRESH_SKEW_SECONDS)
 
 
 def _same_tokens(secret: SourceSecret, tokens: TokenBundle) -> bool:
-    current_refresh = decrypt(secret.oauth_refresh_token) if secret.oauth_refresh_token else ""
-    current_access = decrypt(secret.oauth_access_token) if secret.oauth_access_token else ""
+    current_refresh = (
+        decrypt(secret.oauth_refresh_token) if secret.oauth_refresh_token else ""
+    )
+    current_access = (
+        decrypt(secret.oauth_access_token) if secret.oauth_access_token else ""
+    )
     current_expiry = decrypt(secret.oauth_expiry) if secret.oauth_expiry else ""
     return (
         current_refresh == tokens.refresh_token
@@ -297,7 +323,7 @@ def _expires_in(value: object) -> int:
 
 
 def _utc(now: datetime | None) -> datetime:
-    moment = now if now is not None else datetime.now(timezone.utc)
+    moment = now if now is not None else datetime.now(UTC)
     if moment.tzinfo is None:
-        return moment.replace(tzinfo=timezone.utc)
-    return moment.astimezone(timezone.utc)
+        return moment.replace(tzinfo=UTC)
+    return moment.astimezone(UTC)

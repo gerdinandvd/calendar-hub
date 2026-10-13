@@ -37,7 +37,9 @@ def decrypt(stored: str) -> str:
 
 def equal(left: str, right: str) -> bool:
     digest = hashlib.sha256
-    return hmac.compare_digest(digest(left.encode("utf-8")).digest(), digest(right.encode("utf-8")).digest())
+    return hmac.compare_digest(
+        digest(left.encode("utf-8")).digest(), digest(right.encode("utf-8")).digest()
+    )
 
 
 def _key() -> bytes:

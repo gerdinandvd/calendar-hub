@@ -31,7 +31,12 @@ from app.sync.apply import (
     write_parallel,
 )
 from app.sync.http import REDIRECTS, HttpError, request
-from app.sync.ical import CalendarObject, CalendarParseError, build_object, parse_vcalendar
+from app.sync.ical import (
+    CalendarObject,
+    CalendarParseError,
+    build_object,
+    parse_vcalendar,
+)
 
 MAX_BYTES = 20 * 1024 * 1024
 TIMEOUT_SECONDS = 30
@@ -228,7 +233,9 @@ def _clean(value: str | None) -> str | None:
     return text
 
 
-def import_source(engine: Engine, radicale, source_id: str, *, stop: Callable[[], bool]) -> ImportResult:
+def import_source(
+    engine: Engine, radicale, source_id: str, *, stop: Callable[[], bool]
+) -> ImportResult:
     """Fetch one feed and write it. The runner stores the cursor after a full success."""
 
     with Session(engine) as session:

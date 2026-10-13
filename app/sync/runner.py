@@ -4,7 +4,7 @@ import threading
 import time
 import uuid
 from collections.abc import Callable
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session
@@ -140,7 +140,11 @@ def stop_runs(engine: Engine, timeout: float = SHUTDOWN_SECONDS) -> None:
             thread.join(remaining)
     with _FINAL:
         with _GUARD:
-            alive = [source_id for source_id, thread in _INFLIGHT.items() if thread.is_alive()]
+            alive = [
+                source_id
+                for source_id, thread in _INFLIGHT.items()
+                if thread.is_alive()
+            ]
         for source_id in alive:
             _mark_error(engine, source_id, PROCESS_STOPPED)
 
@@ -238,7 +242,9 @@ def _background(
         lock.release()
 
 
-def _import_pull(engine: Engine, radicale: RadicaleClient, source_id: str) -> ImportResult:
+def _import_pull(
+    engine: Engine, radicale: RadicaleClient, source_id: str
+) -> ImportResult:
     if _STOP.is_set():
         raise Stopped()
     with Session(engine) as session:
@@ -337,4 +343,4 @@ def _log(
 
 
 def _now() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")

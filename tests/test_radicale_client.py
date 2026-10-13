@@ -165,7 +165,9 @@ def test_put_retries_once_after_etag_conflict(caplog) -> None:
     try:
         client = RadicaleClient(base, "hub-internal", "secret")
         with caplog.at_level("ERROR", logger="app"):
-            client.put_event("/owner/one/event.ics", b"BEGIN:VCALENDAR\r\nEND:VCALENDAR\r\n")
+            client.put_event(
+                "/owner/one/event.ics", b"BEGIN:VCALENDAR\r\nEND:VCALENDAR\r\n"
+            )
         methods = [call[0] for call in _EventHandler.calls]
         assert methods == ["GET", "PUT", "GET", "PUT"]
         assert _EventHandler.calls[1][1] == '"v1"'
@@ -184,7 +186,9 @@ def test_failed_etag_retry_raises_and_logs_status(caplog) -> None:
         client = RadicaleClient(base, "hub-internal", "secret")
         with caplog.at_level("ERROR", logger="app"):
             try:
-                client.put_event("/owner/one/event.ics", b"BEGIN:VCALENDAR\r\nEND:VCALENDAR\r\n")
+                client.put_event(
+                    "/owner/one/event.ics", b"BEGIN:VCALENDAR\r\nEND:VCALENDAR\r\n"
+                )
                 raised = False
             except RadicaleError:
                 raised = True
@@ -204,16 +208,16 @@ def test_count_events_counts_ics_children_only() -> None:
                 self.rfile.read(length)
             assert self.headers.get("Depth") == "1"
             body = (
-                "<?xml version='1.0' encoding='utf-8'?>"
-                "<D:multistatus xmlns:D='DAV:'>"
-                "<D:response><D:href>/owner/one/</D:href></D:response>"
-                "<D:response><D:href>/owner/one/keep.ics</D:href></D:response>"
-                "<D:response><D:href>/owner/one/keep.ics</D:href></D:response>"
-                "<D:response><D:href>http://radicale:5232/owner/one/other.ics</D:href></D:response>"
-                "<D:response><D:href>/owner/one/notes.txt</D:href></D:response>"
-                "<D:response><D:href>/owner/two/skip.ics</D:href></D:response>"
-                "</D:multistatus>"
-            ).encode()
+                b"<?xml version='1.0' encoding='utf-8'?>"
+                b"<D:multistatus xmlns:D='DAV:'>"
+                b"<D:response><D:href>/owner/one/</D:href></D:response>"
+                b"<D:response><D:href>/owner/one/keep.ics</D:href></D:response>"
+                b"<D:response><D:href>/owner/one/keep.ics</D:href></D:response>"
+                b"<D:response><D:href>http://radicale:5232/owner/one/other.ics</D:href></D:response>"
+                b"<D:response><D:href>/owner/one/notes.txt</D:href></D:response>"
+                b"<D:response><D:href>/owner/two/skip.ics</D:href></D:response>"
+                b"</D:multistatus>"
+            )
             self.send_response(207)
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()

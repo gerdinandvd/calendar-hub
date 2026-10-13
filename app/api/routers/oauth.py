@@ -73,7 +73,9 @@ def start_google(source_id: str, request: Request) -> Response:
     if kind is None:
         return json_error(404, "not_found", "Not found.")
     if kind != "google":
-        return json_error(422, "invalid_request", "Those fields are only for a Google source.")
+        return json_error(
+            422, "invalid_request", "Those fields are only for a Google source."
+        )
     try:
         redirect_uri = _callback_uri()
         url = google.authorization_url(
@@ -117,4 +119,3 @@ def google_callback(
         return RedirectResponse(f"/sources/{source_id}?google=token", status_code=302)
     log_mutation(actor="owner", source_id=source_id, message="connected google source")
     return RedirectResponse(f"/sources/{source_id}", status_code=302)
-

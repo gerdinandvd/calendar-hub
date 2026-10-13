@@ -1,7 +1,6 @@
 """Bounded HTTP for sync fetchers. Callers map errors to their own sentences."""
 
 import http.client
-import socket
 import ssl
 from urllib.parse import urlsplit
 
@@ -60,7 +59,7 @@ def request(
             payload = _read_limited(response, max_bytes)
         except HttpError:
             raise
-        except (TimeoutError, socket.timeout):
+        except TimeoutError:
             raise HttpError("timeout") from None
         except (OSError, http.client.HTTPException):
             raise HttpError("fetch") from None

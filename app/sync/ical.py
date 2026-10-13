@@ -2,7 +2,7 @@
 
 import re
 from dataclasses import dataclass, replace
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta, timezone
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 _CLOCK = re.compile(r"^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})?$")
@@ -181,7 +181,9 @@ def _start_line(event: CalendarEvent) -> str:
 def _end_line(event: CalendarEvent) -> str:
     if event.all_day:
         return f"DTEND;VALUE=DATE:{_token(event.end_value or '')}"
-    return f"DTEND;TZID={_token(event.timezone or 'UTC')}:{_token(event.end_value or '')}"
+    return (
+        f"DTEND;TZID={_token(event.timezone or 'UTC')}:{_token(event.end_value or '')}"
+    )
 
 
 def _mark_line(name: str, mark: Mark) -> str:
@@ -388,7 +390,9 @@ def _project(
         rrules=rules,
         exdates=tuple(_many(found, "EXDATE", zone, source_name)),
         rdates=tuple(_many(found, "RDATE", zone, source_name)),
-        recurrence_id=None if recurrence is None else _one(recurrence, zone, source_name),
+        recurrence_id=None
+        if recurrence is None
+        else _one(recurrence, zone, source_name),
     )
     return event, is_master, stamp or ""
 
@@ -412,7 +416,9 @@ def _first(
     return items[0]
 
 
-def _text_value(found: dict[str, list[tuple[dict[str, str], str]]], name: str) -> str | None:
+def _text_value(
+    found: dict[str, list[tuple[dict[str, str], str]]], name: str
+) -> str | None:
     item = _first(found, name)
     if item is None:
         return None
@@ -426,7 +432,9 @@ def _plain(found: dict[str, list[tuple[dict[str, str], str]]], name: str) -> str
     return item[1].strip()
 
 
-def _plain_all(found: dict[str, list[tuple[dict[str, str], str]]], name: str) -> list[str]:
+def _plain_all(
+    found: dict[str, list[tuple[dict[str, str], str]]], name: str
+) -> list[str]:
     return [value.strip() for _params, value in found.get(name, [])]
 
 
@@ -449,7 +457,9 @@ def _many(
     return marks
 
 
-def _values(params: dict[str, str], value: str, zone: ZoneInfo, source_name: str) -> list[Mark]:
+def _values(
+    params: dict[str, str], value: str, zone: ZoneInfo, source_name: str
+) -> list[Mark]:
     pieces = [piece for piece in value.split(",") if piece.strip()]
     if not pieces:
         raise CalendarParseError()
@@ -464,7 +474,9 @@ def _values(params: dict[str, str], value: str, zone: ZoneInfo, source_name: str
     return marks
 
 
-def _period(item: str, params: dict[str, str], zone: ZoneInfo, source_name: str) -> Mark:
+def _period(
+    item: str, params: dict[str, str], zone: ZoneInfo, source_name: str
+) -> Mark:
     if "/" not in item:
         raise CalendarParseError()
     left, right = item.split("/", 1)
@@ -477,7 +489,9 @@ def _period(item: str, params: dict[str, str], zone: ZoneInfo, source_name: str)
     end_mark = _mark(end, zone, source_name)
     if start_mark.all_day != end_mark.all_day:
         raise CalendarParseError()
-    return Mark(start_mark.value, start_mark.all_day, start_mark.timezone, end_mark.value)
+    return Mark(
+        start_mark.value, start_mark.all_day, start_mark.timezone, end_mark.value
+    )
 
 
 def _end_from_duration(
@@ -486,7 +500,11 @@ def _end_from_duration(
     zone: ZoneInfo,
     source_name: str,
 ) -> Mark:
-    return _mark(_shift(_instant(start_prop[1].strip(), start_prop[0]), duration), zone, source_name)
+    return _mark(
+        _shift(_instant(start_prop[1].strip(), start_prop[0]), duration),
+        zone,
+        source_name,
+    )
 
 
 def _shift(instant: _Instant, duration: str) -> _Instant:
@@ -499,7 +517,9 @@ def _shift(instant: _Instant, duration: str) -> _Instant:
         return _Instant("date", instant.moment + amount, False)
     if not isinstance(instant.moment, datetime):
         raise CalendarParseError()
-    return _Instant(instant.kind, instant.moment + amount, instant.has_seconds or has_seconds)
+    return _Instant(
+        instant.kind, instant.moment + amount, instant.has_seconds or has_seconds
+    )
 
 
 def _duration(value: str) -> tuple[timedelta, bool, bool]:
@@ -557,7 +577,7 @@ def _instant(raw: str, params: dict[str, str]) -> _Instant:
     except ValueError:
         raise CalendarParseError() from None
     if is_utc:
-        return _Instant("zoned", clock.replace(tzinfo=timezone.utc), has_seconds)
+        return _Instant("zoned", clock.replace(tzinfo=UTC), has_seconds)
     if tzid:
         return _Instant("zoned", clock.replace(tzinfo=_zone(tzid)), has_seconds)
     return _Instant("floating", clock, has_seconds)
@@ -571,7 +591,9 @@ def _mark(instant: _Instant, zone: ZoneInfo, source_name: str) -> Mark:
     if not isinstance(instant.moment, datetime):
         raise CalendarParseError()
     if instant.kind == "floating":
-        return Mark(_format_clock(instant.moment, instant.has_seconds), False, source_name)
+        return Mark(
+            _format_clock(instant.moment, instant.has_seconds), False, source_name
+        )
     local = instant.moment.astimezone(zone)
     return Mark(_format_clock(local, instant.has_seconds), False, source_name)
 
@@ -700,10 +722,14 @@ def merge_partial(
 
 
 def _mark_in(mark: Mark, marks: tuple[Mark, ...]) -> bool:
-    return any(mark.value == item.value and mark.all_day == item.all_day for item in marks)
+    return any(
+        mark.value == item.value and mark.all_day == item.all_day for item in marks
+    )
 
 
-def _google_datetime(raw: str, time_zone: object, zone: ZoneInfo, source_name: str) -> Mark:
+def _google_datetime(
+    raw: str, time_zone: object, zone: ZoneInfo, source_name: str
+) -> Mark:
     match = _GOOGLE_CLOCK.fullmatch(raw.strip())
     if match is None:
         raise CalendarParseError()
@@ -726,11 +752,13 @@ def _google_datetime(raw: str, time_zone: object, zone: ZoneInfo, source_name: s
             local_name = time_zone.strip()
         aware = clock.replace(tzinfo=_zone(local_name))
     elif offset == "Z":
-        aware = clock.replace(tzinfo=timezone.utc)
+        aware = clock.replace(tzinfo=UTC)
     else:
         sign = 1 if offset[0] == "+" else -1
         aware = clock.replace(
-            tzinfo=timezone(sign * timedelta(hours=int(offset[1:3]), minutes=int(offset[4:6])))
+            tzinfo=timezone(
+                sign * timedelta(hours=int(offset[1:3]), minutes=int(offset[4:6]))
+            )
         )
     local = aware.astimezone(zone)
     return Mark(_format_clock(local, has_seconds), False, source_name)

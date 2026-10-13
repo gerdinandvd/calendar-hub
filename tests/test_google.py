@@ -3,7 +3,7 @@
 import base64
 import json
 import threading
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
@@ -41,7 +41,9 @@ class FakeRadicale:
 
     def delete_collection(self, path: str) -> None:
         self.calls.append(("delete", path))
-        self.events = {key: value for key, value in self.events.items() if not key.startswith(path)}
+        self.events = {
+            key: value for key, value in self.events.items() if not key.startswith(path)
+        }
 
     def put_event(self, path: str, body: bytes, *, fresh: bool = False) -> None:
         self.calls.append(("put", path, body))
@@ -60,7 +62,11 @@ class FakeRadicale:
 
     def count_events(self, path: str) -> int:
         prefix = path if path.endswith("/") else f"{path}/"
-        return sum(1 for key in self.events if key.startswith(prefix) and key.lower().endswith(".ics"))
+        return sum(
+            1
+            for key in self.events
+            if key.startswith(prefix) and key.lower().endswith(".ics")
+        )
 
 
 class FakeGoogle:
@@ -103,7 +109,9 @@ class FakeGoogle:
                 self._reject("DELETE")
 
             def _reject(self, method: str) -> None:
-                fake.requests.append({"method": method, "path": urlsplit(self.path).path, "params": {}})
+                fake.requests.append(
+                    {"method": method, "path": urlsplit(self.path).path, "params": {}}
+                )
                 self.send_response(405)
                 self.end_headers()
 
@@ -113,7 +121,10 @@ class FakeGoogle:
                     {
                         "method": method,
                         "path": parsed.path,
-                        "params": {key: values[-1] for key, values in parse_qs(parsed.query).items()},
+                        "params": {
+                            key: values[-1]
+                            for key, values in parse_qs(parsed.query).items()
+                        },
                     }
                 )
                 if parsed.path == "/token":
@@ -187,7 +198,9 @@ def _create(client: TestClient, name: str = "Work", **extra: object) -> dict:
 
 
 def _start(client: TestClient, source_id: str):
-    return client.get(f"/api/oauth/google/start?source_id={source_id}", follow_redirects=False)
+    return client.get(
+        f"/api/oauth/google/start?source_id={source_id}", follow_redirects=False
+    )
 
 
 def _callback(client: TestClient, state: str | None, code: str | None = "code-1"):
@@ -196,7 +209,9 @@ def _callback(client: TestClient, state: str | None, code: str | None = "code-1"
         params["state"] = state
     if code is not None:
         params["code"] = code
-    return client.get("/api/oauth/google/callback", params=params, follow_redirects=False)
+    return client.get(
+        "/api/oauth/google/callback", params=params, follow_redirects=False
+    )
 
 
 def _connect(client: TestClient, source_id: str) -> str:
@@ -229,7 +244,9 @@ def _state(engine, source_id: str) -> dict:
 
 def _mappings(engine, source_id: str) -> list[dict]:
     with Session(engine) as session:
-        rows = session.scalars(select(EventMapping).where(EventMapping.source_id == source_id)).all()
+        rows = session.scalars(
+            select(EventMapping).where(EventMapping.source_id == source_id)
+        ).all()
         return [
             {
                 "external_id": row.external_id,
@@ -243,7 +260,9 @@ def _mappings(engine, source_id: str) -> list[dict]:
 
 
 def _event_body(fake: FakeRadicale, uid: str) -> str:
-    return next(body.decode() for body in fake.events.values() if f"UID:{uid}" in body.decode())
+    return next(
+        body.decode() for body in fake.events.values() if f"UID:{uid}" in body.decode()
+    )
 
 
 def _item(event_id: str, etag: str, **extra: object) -> dict:
@@ -254,8 +273,14 @@ def _item(event_id: str, etag: str, **extra: object) -> dict:
         "summary": event_id,
         "iCalUID": f"{event_id}@google.com",
         "updated": "2026-10-01T08:00:00Z",
-        "start": {"dateTime": "2026-10-07T09:00:30+02:00", "timeZone": "Europe/Amsterdam"},
-        "end": {"dateTime": "2026-10-07T10:00:30+02:00", "timeZone": "Europe/Amsterdam"},
+        "start": {
+            "dateTime": "2026-10-07T09:00:30+02:00",
+            "timeZone": "Europe/Amsterdam",
+        },
+        "end": {
+            "dateTime": "2026-10-07T10:00:30+02:00",
+            "timeZone": "Europe/Amsterdam",
+        },
     }
     item.update(extra)
     return item
@@ -277,7 +302,9 @@ def test_readonly_scope_accepts_only_the_read_scope() -> None:
     assert not _readonly_scope(f"{READONLY_SCOPE} {WRITE_SCOPE}")
 
 
-def test_oauth_state_is_one_time_and_the_button_says_read_only(tmp_path: Path, monkeypatch, caplog) -> None:
+def test_oauth_state_is_one_time_and_the_button_says_read_only(
+    tmp_path: Path, monkeypatch, caplog
+) -> None:
     google = FakeGoogle()
     server, base = _server(google)
     client, fake = _open(tmp_path, monkeypatch, base)
@@ -298,24 +325,34 @@ def test_oauth_state_is_one_time_and_the_button_says_read_only(tmp_path: Path, m
         assert query["prompt"] == ["consent"]
         assert query["response_type"] == ["code"]
         assert "include_granted_scopes" not in query
-        assert query["redirect_uri"] == ["https://localhost:8443/api/oauth/google/callback"]
+        assert query["redirect_uri"] == [
+            "https://localhost:8443/api/oauth/google/callback"
+        ]
         state = query["state"][0]
         assert _calendar_calls(google) == []
         assert google.requests == []
 
         missing = _callback(client, None)
         assert urlsplit(missing.headers["location"]).path == "/"
-        assert parse_qs(urlsplit(missing.headers["location"]).query)["google"] == ["state"]
+        assert parse_qs(urlsplit(missing.headers["location"]).query)["google"] == [
+            "state"
+        ]
         assert google.requests == []
 
         foreign = _callback(client, "not-from-the-hub")
-        assert parse_qs(urlsplit(foreign.headers["location"]).query)["google"] == ["state"]
+        assert parse_qs(urlsplit(foreign.headers["location"]).query)["google"] == [
+            "state"
+        ]
         assert google.requests == []
 
         google.token_payload = {**google.token_payload, "scope": WRITE_SCOPE}
         rejected = _callback(client, state)
-        assert urlsplit(rejected.headers["location"]).path == f"/sources/{created['id']}"
-        assert parse_qs(urlsplit(rejected.headers["location"]).query)["google"] == ["scope"]
+        assert (
+            urlsplit(rejected.headers["location"]).path == f"/sources/{created['id']}"
+        )
+        assert parse_qs(urlsplit(rejected.headers["location"]).query)["google"] == [
+            "scope"
+        ]
         assert [item["path"] for item in google.requests] == ["/token"]
         landed = client.get(rejected.headers["location"])
         assert (
@@ -339,12 +376,20 @@ def test_oauth_state_is_one_time_and_the_button_says_read_only(tmp_path: Path, m
         assert decrypt(stored_access) == "access-marker-value"
         assert "refresh-marker-value" not in stored_refresh
         reused = _callback(client, fresh)
-        assert parse_qs(urlsplit(reused.headers["location"]).query)["google"] == ["state"]
+        assert parse_qs(urlsplit(reused.headers["location"]).query)["google"] == [
+            "state"
+        ]
         with Session(client.app.state.engine) as session:
-            assert session.get(SourceSecret, created["id"]).oauth_refresh_token == stored_refresh
+            assert (
+                session.get(SourceSecret, created["id"]).oauth_refresh_token
+                == stored_refresh
+            )
         connected = client.get(f"/sources/{created['id']}")
         assert "Reconnect Google</a>" in connected.text
-        assert "This connection can only read. It does not change the Google calendar." in connected.text
+        assert (
+            "This connection can only read. It does not change the Google calendar."
+            in connected.text
+        )
         assert "refresh-marker-value" not in connected.text
         assert "access-marker-value" not in connected.text
         assert "refresh-marker-value" not in client.get("/api/sources").text
@@ -360,7 +405,9 @@ def test_oauth_state_is_one_time_and_the_button_says_read_only(tmp_path: Path, m
             "access_token": "access-again",
         }
         replaced = _start(client, created["id"])
-        replaced_state = parse_qs(urlsplit(replaced.headers["location"]).query)["state"][0]
+        replaced_state = parse_qs(urlsplit(replaced.headers["location"]).query)[
+            "state"
+        ][0]
         assert _callback(client, replaced_state).status_code == 302
         with Session(client.app.state.engine) as session:
             secret = session.get(SourceSecret, created["id"])
@@ -373,10 +420,14 @@ def test_oauth_state_is_one_time_and_the_button_says_read_only(tmp_path: Path, m
             "access_token": "access-write",
         }
         blocked = _start(client, created["id"])
-        blocked_state = parse_qs(urlsplit(blocked.headers["location"]).query)["state"][0]
+        blocked_state = parse_qs(urlsplit(blocked.headers["location"]).query)["state"][
+            0
+        ]
         refused = _callback(client, blocked_state)
         assert urlsplit(refused.headers["location"]).path == f"/sources/{created['id']}"
-        assert parse_qs(urlsplit(refused.headers["location"]).query)["google"] == ["scope"]
+        assert parse_qs(urlsplit(refused.headers["location"]).query)["google"] == [
+            "scope"
+        ]
         with Session(client.app.state.engine) as session:
             secret = session.get(SourceSecret, created["id"])
             assert decrypt(secret.oauth_refresh_token) == "refresh-again"
@@ -386,7 +437,9 @@ def test_oauth_state_is_one_time_and_the_button_says_read_only(tmp_path: Path, m
         _close_server(server)
 
 
-def test_google_form_uses_primary_and_a_300_second_poll(tmp_path: Path, monkeypatch) -> None:
+def test_google_form_uses_primary_and_a_300_second_poll(
+    tmp_path: Path, monkeypatch
+) -> None:
     google = FakeGoogle()
     server, base = _server(google)
     client, fake = _open(tmp_path, monkeypatch, base)
@@ -416,7 +469,9 @@ def test_google_form_uses_primary_and_a_300_second_poll(tmp_path: Path, monkeypa
         _close_server(server)
 
 
-def test_full_import_keeps_fields_recurrence_and_etag(tmp_path: Path, monkeypatch) -> None:
+def test_full_import_keeps_fields_recurrence_and_etag(
+    tmp_path: Path, monkeypatch
+) -> None:
     google = FakeGoogle()
     server, base = _server(google)
     client, fake = _open(tmp_path, monkeypatch, base)
@@ -432,8 +487,14 @@ def test_full_import_keeps_fields_recurrence_and_etag(tmp_path: Path, monkeypatc
                         summary="Weekly",
                         description="Bring notes",
                         location="Room 2",
-                        start={"dateTime": "2026-10-05T09:00:30+02:00", "timeZone": "Europe/Amsterdam"},
-                        end={"dateTime": "2026-10-05T10:00:30+02:00", "timeZone": "Europe/Amsterdam"},
+                        start={
+                            "dateTime": "2026-10-05T09:00:30+02:00",
+                            "timeZone": "Europe/Amsterdam",
+                        },
+                        end={
+                            "dateTime": "2026-10-05T10:00:30+02:00",
+                            "timeZone": "Europe/Amsterdam",
+                        },
                         recurrence=[
                             "RRULE:FREQ=WEEKLY;BYDAY=MO",
                             "EXDATE;TZID=Europe/Amsterdam:20261012T090030",
@@ -449,8 +510,14 @@ def test_full_import_keeps_fields_recurrence_and_etag(tmp_path: Path, monkeypatc
                             "dateTime": "2026-10-19T09:00:30+02:00",
                             "timeZone": "Europe/Amsterdam",
                         },
-                        start={"dateTime": "2026-10-19T11:00:00+02:00", "timeZone": "Europe/Amsterdam"},
-                        end={"dateTime": "2026-10-19T12:00:00+02:00", "timeZone": "Europe/Amsterdam"},
+                        start={
+                            "dateTime": "2026-10-19T11:00:00+02:00",
+                            "timeZone": "Europe/Amsterdam",
+                        },
+                        end={
+                            "dateTime": "2026-10-19T12:00:00+02:00",
+                            "timeZone": "Europe/Amsterdam",
+                        },
                     ),
                     _item(
                         "day-1",
@@ -509,23 +576,41 @@ def test_full_import_keeps_fields_recurrence_and_etag(tmp_path: Path, monkeypatc
         _close_server(server)
 
 
-def test_incremental_empty_delta_cancel_and_local_edit(tmp_path: Path, monkeypatch) -> None:
+def test_incremental_empty_delta_cancel_and_local_edit(
+    tmp_path: Path, monkeypatch
+) -> None:
     google = FakeGoogle()
     server, base = _server(google)
     client, fake = _open(tmp_path, monkeypatch, base)
     try:
         created = _create(client)
         _connect(client, created["id"])
-        google.push(*_page([_item("keep-1", "etag-keep", summary="Keep"), _item("gone-1", "etag-gone")], "sync-1"))
+        google.push(
+            *_page(
+                [
+                    _item("keep-1", "etag-keep", summary="Keep"),
+                    _item("gone-1", "etag-gone"),
+                ],
+                "sync-1",
+            )
+        )
         assert _sync(client, created["id"]).status_code == 202
         assert wait_for(client.app.state.engine, created["id"]) == "ok"
-        synced = {row["external_id"]: row["last_synced_at"] for row in _mappings(client.app.state.engine, created["id"])}
+        synced = {
+            row["external_id"]: row["last_synced_at"]
+            for row in _mappings(client.app.state.engine, created["id"])
+        }
 
-        google.push(*_page([_item("keep-1", "etag-keep-2", summary="Keep changed")], "sync-2"))
+        google.push(
+            *_page([_item("keep-1", "etag-keep-2", summary="Keep changed")], "sync-2")
+        )
         assert _sync(client, created["id"]).status_code == 202
         assert wait_for(client.app.state.engine, created["id"]) == "ok"
         assert "SUMMARY:Keep changed" in _event_body(fake, "keep-1@google.com")
-        rows = {row["external_id"]: row for row in _mappings(client.app.state.engine, created["id"])}
+        rows = {
+            row["external_id"]: row
+            for row in _mappings(client.app.state.engine, created["id"])
+        }
         assert rows["gone-1"]["last_synced_at"] == synced["gone-1"]
         assert rows["keep-1"]["external_version"] == "etag-keep-2"
         assert _calendar_calls(google)[-1]["params"]["syncToken"] == "sync-1"
@@ -538,22 +623,33 @@ def test_incremental_empty_delta_cancel_and_local_edit(tmp_path: Path, monkeypat
         assert empty["cursor"] == "sync-3"
         assert empty["events_seen"] == 0
         assert empty["events_upserted"] == 0
-        stamp = datetime.strptime(empty["last_success_at"], "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
-        assert abs((datetime.now(timezone.utc) - stamp).total_seconds()) < 60
-        after_empty = {row["external_id"]: row["last_synced_at"] for row in _mappings(client.app.state.engine, created["id"])}
+        stamp = datetime.strptime(
+            empty["last_success_at"], "%Y-%m-%dT%H:%M:%SZ"
+        ).replace(tzinfo=UTC)
+        assert abs((datetime.now(UTC) - stamp).total_seconds()) < 60
+        after_empty = {
+            row["external_id"]: row["last_synced_at"]
+            for row in _mappings(client.app.state.engine, created["id"])
+        }
         assert after_empty["keep-1"] == rows["keep-1"]["last_synced_at"]
         assert after_empty["gone-1"] == synced["gone-1"]
 
-        path = next(key for key, body in fake.events.items() if b"UID:keep-1@google.com" in body)
+        path = next(
+            key for key, body in fake.events.items() if b"UID:keep-1@google.com" in body
+        )
         fake.events[path] = fake.events[path].replace(b"Keep changed", b"Local edit")
-        google.push(*_page([_item("keep-1", "etag-keep-2", summary="Keep changed")], "sync-4"))
+        google.push(
+            *_page([_item("keep-1", "etag-keep-2", summary="Keep changed")], "sync-4")
+        )
         assert _sync(client, created["id"]).status_code == 202
         assert wait_for(client.app.state.engine, created["id"]) == "ok"
         assert "SUMMARY:Keep changed" in _event_body(fake, "keep-1@google.com")
         assert b"Local edit" not in fake.events[path]
 
         collection = created["collection_path"]
-        fake.events[f"{collection}local.ics"] = b"BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nUID:local-only\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n"
+        fake.events[f"{collection}local.ics"] = (
+            b"BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nUID:local-only\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n"
+        )
         google.push(
             200,
             {
@@ -563,9 +659,15 @@ def test_incremental_empty_delta_cancel_and_local_edit(tmp_path: Path, monkeypat
         )
         assert _sync(client, created["id"]).status_code == 202
         assert wait_for(client.app.state.engine, created["id"]) == "ok"
-        gone = next(row for row in _mappings(client.app.state.engine, created["id"]) if row["external_id"] == "gone-1")
+        gone = next(
+            row
+            for row in _mappings(client.app.state.engine, created["id"])
+            if row["external_id"] == "gone-1"
+        )
         assert gone["deleted_at"] is not None
-        assert all(b"UID:gone-1@google.com" not in body for body in fake.events.values())
+        assert all(
+            b"UID:gone-1@google.com" not in body for body in fake.events.values()
+        )
         assert b"UID:local-only" in fake.events[f"{collection}local.ics"]
         assert all(item["method"] == "GET" for item in _calendar_calls(google))
     finally:
@@ -573,7 +675,9 @@ def test_incremental_empty_delta_cancel_and_local_edit(tmp_path: Path, monkeypat
         _close_server(server)
 
 
-def test_exception_merges_and_a_cancelled_instance_becomes_exdate(tmp_path: Path, monkeypatch) -> None:
+def test_exception_merges_and_a_cancelled_instance_becomes_exdate(
+    tmp_path: Path, monkeypatch
+) -> None:
     google = FakeGoogle()
     server, base = _server(google)
     client, fake = _open(tmp_path, monkeypatch, base)
@@ -608,8 +712,14 @@ def test_exception_merges_and_a_cancelled_instance_becomes_exdate(tmp_path: Path
                             "dateTime": "2026-10-19T09:00:30+02:00",
                             "timeZone": "Europe/Amsterdam",
                         },
-                        start={"dateTime": "2026-10-19T11:00:00+02:00", "timeZone": "Europe/Amsterdam"},
-                        end={"dateTime": "2026-10-19T12:00:00+02:00", "timeZone": "Europe/Amsterdam"},
+                        start={
+                            "dateTime": "2026-10-19T11:00:00+02:00",
+                            "timeZone": "Europe/Amsterdam",
+                        },
+                        end={
+                            "dateTime": "2026-10-19T12:00:00+02:00",
+                            "timeZone": "Europe/Amsterdam",
+                        },
                     )
                 ],
                 "sync-2",
@@ -621,7 +731,10 @@ def test_exception_merges_and_a_cancelled_instance_becomes_exdate(tmp_path: Path
         assert "SUMMARY:Weekly" in series
         assert "SUMMARY:Moved once" in series
         assert "RECURRENCE-ID;TZID=Europe/Amsterdam:20261019T090030" in series
-        assert {row["external_id"] for row in _mappings(client.app.state.engine, created["id"])} == {"series-1"}
+        assert {
+            row["external_id"]
+            for row in _mappings(client.app.state.engine, created["id"])
+        } == {"series-1"}
 
         google.push(
             *_page(
@@ -655,14 +768,20 @@ def test_exception_merges_and_a_cancelled_instance_becomes_exdate(tmp_path: Path
         _close_server(server)
 
 
-def test_invalid_token_recovers_and_a_broken_page_keeps_events(tmp_path: Path, monkeypatch) -> None:
+def test_invalid_token_recovers_and_a_broken_page_keeps_events(
+    tmp_path: Path, monkeypatch
+) -> None:
     google = FakeGoogle()
     server, base = _server(google)
     client, fake = _open(tmp_path, monkeypatch, base)
     try:
         created = _create(client)
         _connect(client, created["id"])
-        google.push(*_page([_item("keep-1", "etag-keep"), _item("drop-1", "etag-drop")], "sync-1"))
+        google.push(
+            *_page(
+                [_item("keep-1", "etag-keep"), _item("drop-1", "etag-drop")], "sync-1"
+            )
+        )
         assert _sync(client, created["id"]).status_code == 202
         assert wait_for(client.app.state.engine, created["id"]) == "ok"
         google.push(410, {"error": "gone"})
@@ -682,13 +801,20 @@ def test_invalid_token_recovers_and_a_broken_page_keeps_events(tmp_path: Path, m
         google.push(*_page([_item("keep-1", "etag-keep")], "sync-2"))
         assert _sync(client, created["id"]).status_code == 202
         assert wait_for(client.app.state.engine, created["id"]) == "ok"
-        rows = {row["external_id"]: row for row in _mappings(client.app.state.engine, created["id"])}
+        rows = {
+            row["external_id"]: row
+            for row in _mappings(client.app.state.engine, created["id"])
+        }
         assert rows["drop-1"]["deleted_at"] is not None
         assert rows["keep-1"]["deleted_at"] is None
-        assert all(b"UID:drop-1@google.com" not in body for body in fake.events.values())
+        assert all(
+            b"UID:drop-1@google.com" not in body for body in fake.events.values()
+        )
         assert _state(client.app.state.engine, created["id"])["cursor"] == "sync-2"
 
-        google.push(200, {"items": [_item("new-1", "etag-new")], "nextPageToken": "page-2"})
+        google.push(
+            200, {"items": [_item("new-1", "etag-new")], "nextPageToken": "page-2"}
+        )
         google.push(500, {"error": "page"})
         puts = len([call for call in fake.calls if call[0] == "put"])
         assert _sync(client, created["id"]).status_code == 202
@@ -699,7 +825,10 @@ def test_invalid_token_recovers_and_a_broken_page_keeps_events(tmp_path: Path, m
         assert "syncToken" not in _calendar_calls(google)[-1]["params"]
         assert len([call for call in fake.calls if call[0] == "put"]) == puts
         assert b"UID:keep-1@google.com" in b"".join(fake.events.values())
-        assert not any(row["external_id"] == "new-1" for row in _mappings(client.app.state.engine, created["id"]))
+        assert not any(
+            row["external_id"] == "new-1"
+            for row in _mappings(client.app.state.engine, created["id"])
+        )
     finally:
         _close(client)
         _close_server(server)
@@ -718,14 +847,26 @@ def test_a_failed_write_does_not_delete_the_rest(tmp_path: Path, monkeypatch) ->
         with Session(client.app.state.engine) as session, session.begin():
             session.get(SyncState, created["id"]).cursor = None
         fake.fail_after = len([call for call in fake.calls if call[0] == "put"]) + 1
-        google.push(*_page([_item("new-1", "etag-new"), _item("new-2", "etag-new-2")], "sync-2"))
+        google.push(
+            *_page([_item("new-1", "etag-new"), _item("new-2", "etag-new-2")], "sync-2")
+        )
         assert _sync(client, created["id"]).status_code == 202
         assert wait_for(client.app.state.engine, created["id"]) == "error"
         assert _state(client.app.state.engine, created["id"])["cursor"] is None
         assert b"UID:keep-1@google.com" in b"".join(fake.events.values())
-        assert any(row["external_id"] == "new-1" for row in _mappings(client.app.state.engine, created["id"]))
-        assert not any(row["external_id"] == "new-2" for row in _mappings(client.app.state.engine, created["id"]))
-        keep = next(row for row in _mappings(client.app.state.engine, created["id"]) if row["external_id"] == "keep-1")
+        assert any(
+            row["external_id"] == "new-1"
+            for row in _mappings(client.app.state.engine, created["id"])
+        )
+        assert not any(
+            row["external_id"] == "new-2"
+            for row in _mappings(client.app.state.engine, created["id"])
+        )
+        keep = next(
+            row
+            for row in _mappings(client.app.state.engine, created["id"])
+            if row["external_id"] == "keep-1"
+        )
         assert keep["deleted_at"] is None
         assert not any(call[0] == "delete-event" for call in fake.calls)
     finally:
@@ -733,7 +874,9 @@ def test_a_failed_write_does_not_delete_the_rest(tmp_path: Path, monkeypatch) ->
         _close_server(server)
 
 
-def test_access_token_is_refreshed_before_it_expires(tmp_path: Path, monkeypatch) -> None:
+def test_access_token_is_refreshed_before_it_expires(
+    tmp_path: Path, monkeypatch
+) -> None:
     google = FakeGoogle()
     server, base = _server(google)
     client, _fake = _open(tmp_path, monkeypatch, base)
@@ -741,7 +884,9 @@ def test_access_token_is_refreshed_before_it_expires(tmp_path: Path, monkeypatch
         created = _create(client)
         _connect(client, created["id"])
         with Session(client.app.state.engine) as session, session.begin():
-            session.get(SourceSecret, created["id"]).oauth_expiry = encrypt("2000-01-01T00:00:00Z")
+            session.get(SourceSecret, created["id"]).oauth_expiry = encrypt(
+                "2000-01-01T00:00:00Z"
+            )
         google.token_payload = {
             "access_token": "access-refreshed",
             "expires_in": 3600,
@@ -771,7 +916,7 @@ def test_poll_clock_and_timezone_apply_to_google(tmp_path: Path, monkeypatch) ->
     try:
         created = _create(client, poll_seconds=3600)
         engine = client.app.state.engine
-        moment = datetime(2026, 10, 8, 12, 0, tzinfo=timezone.utc)
+        moment = datetime(2026, 10, 8, 12, 0, tzinfo=UTC)
         with Session(engine) as session, session.begin():
             state = session.get(SyncState, created["id"])
             state.status = "ok"
@@ -780,7 +925,9 @@ def test_poll_clock_and_timezone_apply_to_google(tmp_path: Path, monkeypatch) ->
         client.patch(f"/api/sources/{created['id']}", json={"enabled": 0}, headers=JSON)
         assert due_source_ids(engine, moment + timedelta(seconds=3600)) == []
         client.patch(f"/api/sources/{created['id']}", json={"enabled": 1}, headers=JSON)
-        assert due_source_ids(engine, moment + timedelta(seconds=3600)) == [created["id"]]
+        assert due_source_ids(engine, moment + timedelta(seconds=3600)) == [
+            created["id"]
+        ]
 
         _connect(client, created["id"])
         google.push(
@@ -802,8 +949,12 @@ def test_poll_clock_and_timezone_apply_to_google(tmp_path: Path, monkeypatch) ->
         client.app.state.scheduler.tick(moment + timedelta(seconds=3600))
         assert wait_for(engine, created["id"]) == "ok"
         assert len(client.get("/api/sources").json()["sources"]) == before
-        assert client.get(f"/api/sources/{created['id']}").json()["poll_seconds"] == 3600
-        assert "DTSTART;TZID=Europe/Amsterdam:20261007T090030" in _event_body(fake, "clock-1@google.com")
+        assert (
+            client.get(f"/api/sources/{created['id']}").json()["poll_seconds"] == 3600
+        )
+        assert "DTSTART;TZID=Europe/Amsterdam:20261007T090030" in _event_body(
+            fake, "clock-1@google.com"
+        )
 
         changed = client.patch(
             f"/api/sources/{created['id']}",
@@ -829,7 +980,9 @@ def test_poll_clock_and_timezone_apply_to_google(tmp_path: Path, monkeypatch) ->
         )
         assert _sync(client, created["id"]).status_code == 202
         assert wait_for(engine, created["id"]) == "ok"
-        assert "DTSTART;TZID=America/New_York:20261007T030030" in _event_body(fake, "clock-1@google.com")
+        assert "DTSTART;TZID=America/New_York:20261007T030030" in _event_body(
+            fake, "clock-1@google.com"
+        )
         assert "DTSTART;VALUE=DATE:20261007" in _event_body(fake, "day-1@google.com")
         assert "syncToken" not in _calendar_calls(google)[-1]["params"]
 

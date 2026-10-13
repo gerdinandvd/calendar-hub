@@ -158,7 +158,9 @@ class RadicaleClient:
             logger.error("radicale_error method=%s status=none", method)
             raise RadicaleError("The calendar could not be saved.")
         port = parsed.port or 80
-        token = base64.b64encode(f"{self.username}:{self.password}".encode()).decode("ascii")
+        token = base64.b64encode(f"{self.username}:{self.password}".encode()).decode(
+            "ascii"
+        )
         headers = {"Authorization": f"Basic {token}"}
         if body is not None:
             headers["Content-Type"] = content_type or "application/xml; charset=utf-8"

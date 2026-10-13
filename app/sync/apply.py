@@ -4,7 +4,7 @@ import uuid
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from urllib.parse import quote
 
 from sqlalchemy import select
@@ -65,7 +65,9 @@ def new_uid() -> str:
     return str(uuid.uuid4())
 
 
-def load_mapping(session: Session, source_id: str, external_id: str) -> EventMapping | None:
+def load_mapping(
+    session: Session, source_id: str, external_id: str
+) -> EventMapping | None:
     stmt = select(EventMapping).where(
         EventMapping.source_id == source_id,
         EventMapping.external_id == external_id,
@@ -228,7 +230,9 @@ def delete_absent_mapped(
         if stop():
             raise Stopped(stats)
         try:
-            removed = delete_mapped(engine, radicale, source_id, collection, external_id)
+            removed = delete_mapped(
+                engine, radicale, source_id, collection, external_id
+            )
         except RunError as exc:
             reraise(exc, stats)
         if removed:
@@ -236,4 +240,4 @@ def delete_absent_mapped(
 
 
 def utc_now() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")

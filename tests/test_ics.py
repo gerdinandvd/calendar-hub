@@ -4,7 +4,7 @@ import base64
 import json
 import threading
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -15,9 +15,16 @@ from app.db.models import EventMapping, Source, SourceSecret, SyncState
 from app.main import create_app
 from app.radicale.client import RadicaleError
 from app.secrets import decrypt
-from app.sync.google import NOT_CONNECTED
-from app.sync.ics import FETCH_MESSAGE, MAX_BYTES, READ_MESSAGE, SIZE_MESSAGE, TIMEOUT_MESSAGE, TIMEOUT_SECONDS
 from app.sync.apply import CAPACITY_MESSAGE, MAX_EVENTS, SAVE_MESSAGE
+from app.sync.google import NOT_CONNECTED
+from app.sync.ics import (
+    FETCH_MESSAGE,
+    MAX_BYTES,
+    READ_MESSAGE,
+    SIZE_MESSAGE,
+    TIMEOUT_MESSAGE,
+    TIMEOUT_SECONDS,
+)
 from app.sync.runner import PROCESS_STOPPED, stop_runs, wait_for
 from app.sync.scheduler import due_source_ids
 
@@ -43,13 +50,17 @@ class FakeRadicale:
 
     def delete_collection(self, path: str) -> None:
         self.calls.append(("delete", path))
-        self.events = {key: value for key, value in self.events.items() if not key.startswith(path)}
+        self.events = {
+            key: value for key, value in self.events.items() if not key.startswith(path)
+        }
 
     def put_event(self, path: str, body: bytes, *, fresh: bool = False) -> None:
         with self._lock:
             self.calls.append(("put", path, body))
             puts = [call for call in self.calls if call[0] == "put"]
-            if self.fail_put or (self.fail_after is not None and len(puts) > self.fail_after):
+            if self.fail_put or (
+                self.fail_after is not None and len(puts) > self.fail_after
+            ):
                 raise RadicaleError("The calendar could not be saved.")
             self.events[path] = body
 
@@ -63,7 +74,11 @@ class FakeRadicale:
 
     def count_events(self, path: str) -> int:
         prefix = path if path.endswith("/") else f"{path}/"
-        return sum(1 for key in self.events if key.startswith(prefix) and key.lower().endswith(".ics"))
+        return sum(
+            1
+            for key in self.events
+            if key.startswith(prefix) and key.lower().endswith(".ics")
+        )
 
 
 class Feed:
@@ -197,7 +212,11 @@ def _sync(client: TestClient, source_id: str):
 
 def _mappings(engine, source_id: str) -> list[dict]:
     with Session(engine) as session:
-        rows = session.query(EventMapping).filter(EventMapping.source_id == source_id).all()
+        rows = (
+            session.query(EventMapping)
+            .filter(EventMapping.source_id == source_id)
+            .all()
+        )
         return [
             {
                 "external_id": row.external_id,
@@ -235,7 +254,9 @@ def test_limits_are_the_design_defaults() -> None:
     assert MAX_BYTES == 20 * 1024 * 1024
 
 
-def test_import_keeps_fields_and_a_second_run_does_not_rewrite(tmp_path: Path, monkeypatch) -> None:
+def test_import_keeps_fields_and_a_second_run_does_not_rewrite(
+    tmp_path: Path, monkeypatch
+) -> None:
     feed = Feed()
     server, base = _server(feed)
     client, fake = _open(tmp_path, monkeypatch)
@@ -295,7 +316,9 @@ def test_import_keeps_fields_and_a_second_run_does_not_rewrite(tmp_path: Path, m
         assert _sync(client, created["id"]).status_code == 202
         assert wait_for(client.app.state.engine, created["id"]) == "ok"
         stored = {path: body.decode() for path, body in fake.events.items()}
-        series_body = next(body for path, body in stored.items() if path.endswith("series-1.ics"))
+        series_body = next(
+            body for path, body in stored.items() if path.endswith("series-1.ics")
+        )
         assert series_body.count("BEGIN:VEVENT") == 2
         assert "RRULE:FREQ=WEEKLY;BYDAY=MO" in series_body
         assert "EXDATE;TZID=Europe/Amsterdam:20261014T090015" in series_body
@@ -306,7 +329,9 @@ def test_import_keeps_fields_and_a_second_run_does_not_rewrite(tmp_path: Path, m
         assert "TZID" not in day
         utc = next(body for path, body in stored.items() if path.endswith("utc-1.ics"))
         assert "DTSTART;TZID=Europe/Amsterdam:20261007T090015" in utc
-        keep = next(body for path, body in stored.items() if path.endswith("keep-1.ics"))
+        keep = next(
+            body for path, body in stored.items() if path.endswith("keep-1.ics")
+        )
         assert "DTSTART;TZID=Europe/Amsterdam:20261007T0900\r\n" in keep
         mappings = _mappings(client.app.state.engine, created["id"])
         assert len(mappings) == 4
@@ -315,7 +340,9 @@ def test_import_keeps_fields_and_a_second_run_does_not_rewrite(tmp_path: Path, m
         assert series_row["external_version"] == "20261001T080000Z"
         assert fake.events[local] == b"BEGIN:VCALENDAR\r\nEND:VCALENDAR\r\n"
         assert feed.requests[0]["authorization"] == HEADER
-        kept_at = next(row["last_synced_at"] for row in mappings if row["external_id"] == "keep-1")
+        kept_at = next(
+            row["last_synced_at"] for row in mappings if row["external_id"] == "keep-1"
+        )
         puts = len(_puts(fake))
 
         feed.default = _calendar(
@@ -358,7 +385,9 @@ def test_import_keeps_fields_and_a_second_run_does_not_rewrite(tmp_path: Path, m
         _close_server(server)
 
 
-def test_not_modified_and_failures_leave_the_collection(tmp_path: Path, monkeypatch, caplog) -> None:
+def test_not_modified_and_failures_leave_the_collection(
+    tmp_path: Path, monkeypatch, caplog
+) -> None:
     feed = Feed()
     server, base = _server(feed)
     client, fake = _open(tmp_path, monkeypatch)
@@ -381,7 +410,10 @@ def test_not_modified_and_failures_leave_the_collection(tmp_path: Path, monkeypa
         assert after["cursor"] == cursor
         assert after["events_upserted"] == 0
         assert len(_puts(fake)) == puts
-        assert _mappings(client.app.state.engine, created["id"])[0]["last_synced_at"] == synced
+        assert (
+            _mappings(client.app.state.engine, created["id"])[0]["last_synced_at"]
+            == synced
+        )
         assert feed.requests[-1]["if_none_match"] == '"feed"'
 
         feed.status = 200
@@ -421,7 +453,9 @@ def test_not_modified_and_failures_leave_the_collection(tmp_path: Path, monkeypa
         _close_server(server)
 
 
-def test_a_failed_write_keeps_what_was_saved_and_the_cursor(tmp_path: Path, monkeypatch) -> None:
+def test_a_failed_write_keeps_what_was_saved_and_the_cursor(
+    tmp_path: Path, monkeypatch
+) -> None:
     feed = Feed()
     server, base = _server(feed)
     client, fake = _open(tmp_path, monkeypatch)
@@ -448,7 +482,9 @@ def test_a_failed_write_keeps_what_was_saved_and_the_cursor(tmp_path: Path, monk
         _close_server(server)
 
 
-def test_redirect_scheme_is_rejected_and_same_scheme_is_followed(tmp_path: Path, monkeypatch) -> None:
+def test_redirect_scheme_is_rejected_and_same_scheme_is_followed(
+    tmp_path: Path, monkeypatch
+) -> None:
     feed = Feed()
     server, base = _server(feed)
     client, fake = _open(tmp_path, monkeypatch)
@@ -458,7 +494,10 @@ def test_redirect_scheme_is_rejected_and_same_scheme_is_followed(tmp_path: Path,
         created = _create(client, f"{base}/start")
         assert _sync(client, created["id"]).status_code == 202
         assert wait_for(client.app.state.engine, created["id"]) == "error"
-        assert _state(client.app.state.engine, created["id"])["last_error_message"] == FETCH_MESSAGE
+        assert (
+            _state(client.app.state.engine, created["id"])["last_error_message"]
+            == FETCH_MESSAGE
+        )
         assert fake.events == {}
         assert len(feed.requests) == 1
 
@@ -467,7 +506,10 @@ def test_redirect_scheme_is_rejected_and_same_scheme_is_followed(tmp_path: Path,
         assert _sync(client, created["id"]).status_code == 202
         assert wait_for(client.app.state.engine, created["id"]) == "ok"
         assert any(path.endswith("moved.ics") for path in fake.events)
-        assert [item["path"] for item in feed.requests[-2:]] == ["/start", "/calendar.ics"]
+        assert [item["path"] for item in feed.requests[-2:]] == [
+            "/start",
+            "/calendar.ics",
+        ]
     finally:
         _close(client)
         _close_server(server)
@@ -483,7 +525,9 @@ def test_manual_sync_answers_and_the_button(tmp_path: Path, monkeypatch) -> None
         created = _create(client, f"{base}/feed.ics")
         private = client.post("/api/sources", json={"name": "Home"}, headers=JSON)
         assert private.status_code == 201
-        hook = client.post("/api/sources", json={"name": "Hook", "kind": "webhook"}, headers=JSON)
+        hook = client.post(
+            "/api/sources", json={"name": "Hook", "kind": "webhook"}, headers=JSON
+        )
         assert hook.status_code == 201
         page = client.get("/sources")
         assert page.text.count("Sync now") == 1
@@ -577,7 +621,10 @@ def test_google_start_ends_without_a_write(tmp_path: Path, monkeypatch) -> None:
         started = _sync(client, source_id)
         assert started.status_code == 202
         assert wait_for(client.app.state.engine, source_id) == "error"
-        assert _state(client.app.state.engine, source_id)["last_error_message"] == NOT_CONNECTED
+        assert (
+            _state(client.app.state.engine, source_id)["last_error_message"]
+            == NOT_CONNECTED
+        )
         assert _puts(fake) == []
         with Session(client.app.state.engine) as session, session.begin():
             session.get(SyncState, source_id).status = "running"
@@ -588,14 +635,18 @@ def test_google_start_ends_without_a_write(tmp_path: Path, monkeypatch) -> None:
         _close(client)
 
 
-def test_header_stays_out_of_pages_and_logs(tmp_path: Path, monkeypatch, caplog) -> None:
+def test_header_stays_out_of_pages_and_logs(
+    tmp_path: Path, monkeypatch, caplog
+) -> None:
     feed = Feed()
     server, base = _server(feed)
     client, _fake = _open(tmp_path, monkeypatch)
     try:
         feed.default = _calendar(*_event("one"))
         with caplog.at_level("INFO", logger="app"):
-            created = _create(client, f"{base}/feed.ics", ics_authorization_header=HEADER)
+            created = _create(
+                client, f"{base}/feed.ics", ics_authorization_header=HEADER
+            )
             assert _sync(client, created["id"]).status_code == 202
             assert wait_for(client.app.state.engine, created["id"]) == "ok"
         page = client.get(f"/sources/{created['id']}")
@@ -613,7 +664,9 @@ def test_header_stays_out_of_pages_and_logs(tmp_path: Path, monkeypatch, caplog)
         _close_server(server)
 
 
-def test_ics_form_rejects_a_bad_url_and_keeps_the_header_choice(tmp_path: Path, monkeypatch) -> None:
+def test_ics_form_rejects_a_bad_url_and_keeps_the_header_choice(
+    tmp_path: Path, monkeypatch
+) -> None:
     client, fake = _open(tmp_path, monkeypatch)
     try:
         form = client.get("/sources/new?kind=ics")
@@ -623,7 +676,11 @@ def test_ics_form_rejects_a_bad_url_and_keeps_the_header_choice(tmp_path: Path, 
         assert ">External ICS<" in form.text
         bad = client.post(
             "/sources?kind=ics",
-            data={"name": "Feed", "ics_url": "http://example.com/feed.ics", "poll_seconds": "900"},
+            data={
+                "name": "Feed",
+                "ics_url": "http://example.com/feed.ics",
+                "poll_seconds": "900",
+            },
             headers=HX,
         )
         assert bad.status_code == 200
@@ -631,7 +688,11 @@ def test_ics_form_rejects_a_bad_url_and_keeps_the_header_choice(tmp_path: Path, 
         assert fake.calls == []
         bad_poll = client.post(
             "/sources?kind=ics",
-            data={"name": "Feed", "ics_url": "https://example.com/feed.ics", "poll_seconds": "soon"},
+            data={
+                "name": "Feed",
+                "ics_url": "https://example.com/feed.ics",
+                "poll_seconds": "soon",
+            },
             headers=HX,
         )
         assert "Enter a poll interval in seconds." in bad_poll.text
@@ -640,7 +701,9 @@ def test_ics_form_rejects_a_bad_url_and_keeps_the_header_choice(tmp_path: Path, 
         _close(client)
 
 
-def test_planner_uses_the_clock_and_a_changed_source_is_fetched_again(tmp_path: Path, monkeypatch) -> None:
+def test_planner_uses_the_clock_and_a_changed_source_is_fetched_again(
+    tmp_path: Path, monkeypatch
+) -> None:
     feed = Feed()
     server, base = _server(feed)
     client, fake = _open(tmp_path, monkeypatch)
@@ -656,7 +719,7 @@ def test_planner_uses_the_clock_and_a_changed_source_is_fetched_again(tmp_path: 
         )
         created = _create(client, f"{base}/feed.ics", poll_seconds=3600)
         engine = client.app.state.engine
-        moment = datetime(2026, 10, 8, 12, 0, tzinfo=timezone.utc)
+        moment = datetime(2026, 10, 8, 12, 0, tzinfo=UTC)
         with Session(engine) as session, session.begin():
             state = session.get(SyncState, created["id"])
             state.status = "ok"
@@ -667,13 +730,17 @@ def test_planner_uses_the_clock_and_a_changed_source_is_fetched_again(tmp_path: 
         assert due_source_ids(engine, moment + timedelta(seconds=3600)) == []
         with Session(engine) as session, session.begin():
             session.get(Source, created["id"]).enabled = 1
-        assert due_source_ids(engine, moment + timedelta(seconds=3600)) == [created["id"]]
+        assert due_source_ids(engine, moment + timedelta(seconds=3600)) == [
+            created["id"]
+        ]
         before = len(client.get("/api/sources").json()["sources"])
         poll = client.get(f"/api/sources/{created['id']}").json()["poll_seconds"]
         client.app.state.scheduler.tick(moment + timedelta(seconds=3600))
         assert wait_for(engine, created["id"]) == "ok"
         assert len(client.get("/api/sources").json()["sources"]) == before
-        assert client.get(f"/api/sources/{created['id']}").json()["poll_seconds"] == poll
+        assert (
+            client.get(f"/api/sources/{created['id']}").json()["poll_seconds"] == poll
+        )
         body = next(iter(fake.events.values())).decode()
         assert "DTSTART;TZID=Europe/Amsterdam:20261007T150000" in body
 
@@ -726,7 +793,9 @@ def test_planner_uses_the_clock_and_a_changed_source_is_fetched_again(tmp_path: 
         _close_server(server)
 
 
-def test_shutdown_marks_a_blocked_run_and_keeps_events(tmp_path: Path, monkeypatch) -> None:
+def test_shutdown_marks_a_blocked_run_and_keeps_events(
+    tmp_path: Path, monkeypatch
+) -> None:
     feed = Feed()
     feed.hold = threading.Event()
     server, base = _server(feed)
@@ -746,7 +815,10 @@ def test_shutdown_marks_a_blocked_run_and_keeps_events(tmp_path: Path, monkeypat
         assert wait_for(client.app.state.engine, created["id"]) == "error"
         assert fake.events == {}
         assert _state(client.app.state.engine, created["id"])["cursor"] is None
-        assert _state(client.app.state.engine, created["id"])["last_error_message"] == PROCESS_STOPPED
+        assert (
+            _state(client.app.state.engine, created["id"])["last_error_message"]
+            == PROCESS_STOPPED
+        )
     finally:
         feed.hold.set()
         _close(client)
@@ -754,10 +826,14 @@ def test_shutdown_marks_a_blocked_run_and_keeps_events(tmp_path: Path, monkeypat
 
 
 def _restamp(lines: list[str], stamp: str) -> list[str]:
-    return [f"DTSTAMP:{stamp}" if line.startswith("DTSTAMP:") else line for line in lines]
+    return [
+        f"DTSTAMP:{stamp}" if line.startswith("DTSTAMP:") else line for line in lines
+    ]
 
 
-def test_event_limit_keeps_written_events_and_the_cursor(tmp_path: Path, monkeypatch) -> None:
+def test_event_limit_keeps_written_events_and_the_cursor(
+    tmp_path: Path, monkeypatch
+) -> None:
     feed = Feed()
     server, base = _server(feed)
     client, fake = _open(tmp_path, monkeypatch)
@@ -790,7 +866,9 @@ def test_event_limit_keeps_written_events_and_the_cursor(tmp_path: Path, monkeyp
         assert fake.count_events(collection) == MAX_EVENTS
 
         feed.etag = '"edited"'
-        feed.default = _calendar(*_restamp(_event("one"), "20261002T080000Z"), *_event("new-a"))
+        feed.default = _calendar(
+            *_restamp(_event("one"), "20261002T080000Z"), *_event("new-a")
+        )
         assert _sync(client, created["id"]).status_code == 202
         assert wait_for(client.app.state.engine, created["id"]) == "ok"
         edited = _state(client.app.state.engine, created["id"])

@@ -1,7 +1,7 @@
 """Polls Google and ICS sources."""
 
 import asyncio
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy import select
 from sqlalchemy.engine import Engine
@@ -9,7 +9,13 @@ from sqlalchemy.orm import Session
 
 from app.db.models import Source, SyncState
 from app.radicale.client import RadicaleClient
-from app.sync.runner import SHUTDOWN_SECONDS, SlotBusy, SyncRejected, start_sync, stop_runs
+from app.sync.runner import (
+    SHUTDOWN_SECONDS,
+    SlotBusy,
+    SyncRejected,
+    start_sync,
+    stop_runs,
+)
 
 TICK_SECONDS = 10
 
@@ -36,7 +42,7 @@ class Scheduler:
         self._loop_stop.set()
 
     def tick(self, now: datetime | None = None) -> list[str]:
-        moment = now if now is not None else datetime.now(timezone.utc)
+        moment = now if now is not None else datetime.now(UTC)
         started: list[str] = []
         for source_id in due_source_ids(self.engine, moment):
             try:
@@ -61,12 +67,18 @@ class Scheduler:
 
 
 def due_source_ids(engine: Engine, now: datetime) -> list[str]:
-    moment = now.astimezone(timezone.utc) if now.tzinfo is not None else now.replace(tzinfo=timezone.utc)
+    moment = now.astimezone(UTC) if now.tzinfo is not None else now.replace(tzinfo=UTC)
     chosen: list[str] = []
     with Session(engine) as session:
-        rows = session.scalars(select(Source).order_by(Source.created_at, Source.id)).all()
+        rows = session.scalars(
+            select(Source).order_by(Source.created_at, Source.id)
+        ).all()
         for row in rows:
-            if row.kind not in {"google", "ics"} or row.enabled != 1 or not row.poll_seconds:
+            if (
+                row.kind not in {"google", "ics"}
+                or row.enabled != 1
+                or not row.poll_seconds
+            ):
                 continue
             state = session.get(SyncState, row.id)
             if state is None or state.status in {"running", "na"}:
@@ -81,7 +93,7 @@ def due_source_ids(engine: Engine, now: datetime) -> list[str]:
 
 def _elapsed(stamp: str, now: datetime) -> float | None:
     try:
-        last = datetime.strptime(stamp, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+        last = datetime.strptime(stamp, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=UTC)
     except ValueError:
         return None
     return (now - last).total_seconds()

@@ -2,7 +2,13 @@
 
 import pytest
 
-from app.sync.ical import CalendarEvent, CalendarParseError, build_object, build_vcalendar, parse_vcalendar
+from app.sync.ical import (
+    CalendarEvent,
+    CalendarParseError,
+    build_object,
+    build_vcalendar,
+    parse_vcalendar,
+)
 
 
 def _event(**overrides) -> CalendarEvent:
@@ -29,7 +35,13 @@ def _unfold(text: str) -> str:
 
 def test_timed_event_keeps_seconds_and_zone() -> None:
     text = build_vcalendar(
-        _event(summary="Meet", description="a;b,c\\d", location="Room 1", status="CONFIRMED", rrule="FREQ=WEEKLY;BYDAY=MO")
+        _event(
+            summary="Meet",
+            description="a;b,c\\d",
+            location="Room 1",
+            status="CONFIRMED",
+            rrule="FREQ=WEEKLY;BYDAY=MO",
+        )
     )
     unfolded = _unfold(text)
     assert "BEGIN:VCALENDAR" in text
@@ -46,7 +58,11 @@ def test_timed_event_keeps_seconds_and_zone() -> None:
 
 
 def test_all_day_uses_date_without_a_zone_shift() -> None:
-    text = _unfold(build_vcalendar(_event(start_value="20261007", end_value=None, all_day=True, timezone=None)))
+    text = _unfold(
+        build_vcalendar(
+            _event(start_value="20261007", end_value=None, all_day=True, timezone=None)
+        )
+    )
     assert "DTSTART;VALUE=DATE:20261007" in text
     assert "DTEND" not in text
     assert "TZID" not in text
@@ -112,8 +128,12 @@ def test_parse_keeps_all_day_seconds_zone_and_recurrence() -> None:
     assert day.timezone is None
     written = build_object(series)
     assert written.count("BEGIN:VEVENT") == 2
-    assert "RECURRENCE-ID;TZID=Europe/Amsterdam:20261021T090015" in written.replace("\r\n ", "")
-    assert "EXDATE;TZID=Europe/Amsterdam:20261014T090015" in written.replace("\r\n ", "")
+    assert "RECURRENCE-ID;TZID=Europe/Amsterdam:20261021T090015" in written.replace(
+        "\r\n ", ""
+    )
+    assert "EXDATE;TZID=Europe/Amsterdam:20261014T090015" in written.replace(
+        "\r\n ", ""
+    )
 
 
 def test_parse_projects_utc_floating_and_other_zones() -> None:
@@ -140,7 +160,10 @@ def test_parse_projects_utc_floating_and_other_zones() -> None:
         "SUMMARY:New York",
         "END:VEVENT",
     )
-    objects = {item.uid: item.components[0] for item in parse_vcalendar(text, "Europe/Amsterdam")}
+    objects = {
+        item.uid: item.components[0]
+        for item in parse_vcalendar(text, "Europe/Amsterdam")
+    }
     assert objects["utc-1"].start_value == "20261007T090015"
     assert objects["utc-1"].end_value == "20261007T100015"
     assert objects["utc-1"].timezone == "Europe/Amsterdam"

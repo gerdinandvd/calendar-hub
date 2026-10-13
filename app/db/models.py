@@ -45,7 +45,9 @@ class EventMapping(Base):
     """Links an external id to one stable UID in Radicale."""
 
     __tablename__ = "event_mappings"
-    __table_args__ = (UniqueConstraint("source_id", "external_id", name="uq_mapping_source_external"),)
+    __table_args__ = (
+        UniqueConstraint("source_id", "external_id", name="uq_mapping_source_external"),
+    )
 
     id: Mapped[str] = mapped_column(String, primary_key=True)
     source_id: Mapped[str] = mapped_column(String, nullable=False)

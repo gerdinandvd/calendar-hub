@@ -28,9 +28,7 @@ from app.sync.ical import (
 
 PAGE_SIZE = 250
 MAX_PAGES = 400
-_UPDATED = re.compile(
-    r"^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d+)?Z$"
-)
+_UPDATED = re.compile(r"^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d+)?Z$")
 _STABLE_STAMP = "19700101T000000Z"
 _LIST_STATUSES = frozenset({200, 410})
 
@@ -95,7 +93,9 @@ def fetch_events(
         )
     return GoogleSnapshot(
         full=stored_token is None,
-        changes=_checked(items, source_timezone, full=stored_token is None, invalidated=False),
+        changes=_checked(
+            items, source_timezone, full=stored_token is None, invalidated=False
+        ),
         sync_token=sync_token,
         tokens=current,
         cursor_invalidated=False,
@@ -117,7 +117,9 @@ def _checked(
         raise GoogleError(exc.message, invalidate_cursor=invalidated) from None
 
 
-def _changes(items: list, source_timezone: str, *, full: bool) -> tuple[GoogleChange, ...]:
+def _changes(
+    items: list, source_timezone: str, *, full: bool
+) -> tuple[GoogleChange, ...]:
     if not isinstance(items, list):
         raise GoogleError(READ_MESSAGE)
     groups: dict[str, list[dict]] = {}
@@ -126,7 +128,11 @@ def _changes(items: list, source_timezone: str, *, full: bool) -> tuple[GoogleCh
         if not isinstance(item, dict):
             raise GoogleError(READ_MESSAGE)
         series = item.get("recurringEventId") or item.get("id")
-        if not isinstance(series, str) or not series.strip() or any(char in series for char in "\r\n"):
+        if (
+            not isinstance(series, str)
+            or not series.strip()
+            or any(char in series for char in "\r\n")
+        ):
             raise GoogleError(READ_MESSAGE)
         key = series.strip()
         if key not in groups:
@@ -136,7 +142,9 @@ def _changes(items: list, source_timezone: str, *, full: bool) -> tuple[GoogleCh
     return tuple(_one(key, groups[key], source_timezone, full=full) for key in order)
 
 
-def _one(series_id: str, items: list[dict], source_timezone: str, *, full: bool) -> GoogleChange:
+def _one(
+    series_id: str, items: list[dict], source_timezone: str, *, full: bool
+) -> GoogleChange:
     masters = [item for item in items if not item.get("recurringEventId")]
     others = [item for item in items if item.get("recurringEventId")]
     if any(_cancelled(item) for item in masters):
@@ -186,7 +194,9 @@ def _one(series_id: str, items: list[dict], source_timezone: str, *, full: bool)
             include_recurrence=True,
         )
         if exdates:
-            master_event = replace(master_event, exdates=_dedupe(master_event.exdates + tuple(exdates)))
+            master_event = replace(
+                master_event, exdates=_dedupe(master_event.exdates + tuple(exdates))
+            )
     if master_event is None and not exceptions and not exdates:
         raise GoogleError(READ_MESSAGE)
     if (master_event is not None or exceptions) and not etag:
@@ -215,7 +225,11 @@ def _component(
         raise GoogleError(READ_MESSAGE)
     try:
         start = google_point(item.get("start"), source_timezone)
-        end = None if item.get("end") is None else google_point(item.get("end"), source_timezone)
+        end = (
+            None
+            if item.get("end") is None
+            else google_point(item.get("end"), source_timezone)
+        )
         if end is not None and end.all_day != start.all_day:
             raise CalendarParseError()
         parts = (
@@ -289,7 +303,11 @@ def _list_all(
             page = next_page
             continue
         next_sync = payload.get("nextSyncToken")
-        if isinstance(next_sync, str) and next_sync and not any(char in next_sync for char in "\r\n"):
+        if (
+            isinstance(next_sync, str)
+            and next_sync
+            and not any(char in next_sync for char in "\r\n")
+        ):
             sync_out = next_sync
         break
     else:
@@ -299,7 +317,9 @@ def _list_all(
     return items, sync_out
 
 
-def _events_url(calendar_id: str, sync_token: str | None, page_token: str | None) -> str:
+def _events_url(
+    calendar_id: str, sync_token: str | None, page_token: str | None
+) -> str:
     params = {"singleEvents": "false", "maxResults": str(PAGE_SIZE)}
     if page_token:
         params["pageToken"] = page_token
@@ -316,7 +336,11 @@ def _cancelled(item: dict) -> bool:
 
 def _etag(item: dict) -> str:
     raw = item.get("etag")
-    if not isinstance(raw, str) or not raw.strip() or any(char in raw for char in "\r\n"):
+    if (
+        not isinstance(raw, str)
+        or not raw.strip()
+        or any(char in raw for char in "\r\n")
+    ):
         return ""
     return raw
 
@@ -325,7 +349,11 @@ def _ical(item: dict) -> str | None:
     raw = item.get("iCalUID")
     if raw is None:
         return None
-    if not isinstance(raw, str) or not raw.strip() or any(char in raw for char in "\r\n"):
+    if (
+        not isinstance(raw, str)
+        or not raw.strip()
+        or any(char in raw for char in "\r\n")
+    ):
         raise GoogleError(READ_MESSAGE)
     return raw.strip()
 
@@ -370,6 +398,8 @@ def _dtstamp(item: dict) -> str:
 def _dedupe(marks: tuple[Mark, ...]) -> tuple[Mark, ...]:
     chosen: list[Mark] = []
     for mark in marks:
-        if not any(mark.value == item.value and mark.all_day == item.all_day for item in chosen):
+        if not any(
+            mark.value == item.value and mark.all_day == item.all_day for item in chosen
+        ):
             chosen.append(mark)
     return tuple(chosen)

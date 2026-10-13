@@ -4,7 +4,7 @@ import hashlib
 import json
 import re
 from dataclasses import dataclass
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from sqlalchemy.engine import Engine
@@ -98,7 +98,7 @@ def apply(engine: Engine, radicale, source: dict, command: Upsert | Delete) -> R
 
 
 def calendar_bytes(command: Upsert, uid: str) -> bytes:
-    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
     text = build_vcalendar(
         CalendarEvent(
             uid=uid,
@@ -159,7 +159,9 @@ def _apply_upsert(engine: Engine, radicale, source: dict, command: Upsert) -> Ru
         raise RunError(exc.message, RunStats(seen=1)) from None
     when = utc_now()
     with Session(engine) as session, session.begin():
-        remember(session, source["id"], command.external_id, uid, command.revision, when)
+        remember(
+            session, source["id"], command.external_id, uid, command.revision, when
+        )
     return RunStats(seen=1, upserted=1)
 
 
@@ -349,5 +351,7 @@ def _timezone_ok(value: str) -> bool:
 
 
 def _revision(canonical: dict) -> str:
-    raw = json.dumps(canonical, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    raw = json.dumps(
+        canonical, sort_keys=True, separators=(",", ":"), ensure_ascii=False
+    )
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()

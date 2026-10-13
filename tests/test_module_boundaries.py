@@ -1,7 +1,7 @@
 """Guards the module boundaries from the design.
 
 Import-graph checks below are stopgaps until Import Linter owns those
-contracts (see docs/python-toolchain-responsibilities.md). Drop them then;
+contracts (see docs/python-toolchain.md). Drop them then;
 keep content/layout invariants such as the VEVENT marker rule.
 """
 

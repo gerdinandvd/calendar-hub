@@ -118,7 +118,9 @@ def install_access(app: FastAPI) -> None:
         return PlainTextResponse(detail, status_code=exc.status_code)
 
     @app.exception_handler(RequestValidationError)
-    async def invalid_request(request: Request, _exc: RequestValidationError) -> Response:
+    async def invalid_request(
+        request: Request, _exc: RequestValidationError
+    ) -> Response:
         error, detail = _STATUS[422]
         if _is_api(request.url.path):
             return json_error(422, error, detail)

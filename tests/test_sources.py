@@ -119,7 +119,12 @@ def test_private_source_lifecycle(tmp_path: Path, monkeypatch, caplog) -> None:
         assert [call[0] for call in fake.calls].count("proppatch") == 1
 
         other = _create(client, "Other")
-        assert fake.calls[-1] == ("create", other["collection_path"], "Other", "#1a73e8")
+        assert fake.calls[-1] == (
+            "create",
+            other["collection_path"],
+            "Other",
+            "#1a73e8",
+        )
         assert created["collection_path"] not in {call[1] for call in fake.calls[-1:]}
 
         kept = client.delete(f"/api/sources/{created['id']}", headers=JSON)
@@ -158,7 +163,9 @@ def test_twenty_first_source_is_refused(tmp_path: Path, monkeypatch) -> None:
         _close(client)
 
 
-def test_invalid_source_input_does_not_create_a_collection(tmp_path: Path, monkeypatch) -> None:
+def test_invalid_source_input_does_not_create_a_collection(
+    tmp_path: Path, monkeypatch
+) -> None:
     client, fake = _open(tmp_path, monkeypatch)
     try:
         cases = [
@@ -207,11 +214,17 @@ def test_admin_pages_and_field_errors(tmp_path: Path, monkeypatch) -> None:
         assert "Use the password of the hub user." in home.text
         assert "On Android, add this account in DAVx⁵." in home.text
         assert "On iOS, add a CalDAV account in the calendar app." in home.text
-        assert "In Thunderbird, add a calendar on the network and choose CalDAV." in home.text
+        assert (
+            "In Thunderbird, add a calendar on the network and choose CalDAV."
+            in home.text
+        )
         assert SECRET_PASSWORD not in home.text
         assert INTERNAL_USER not in home.text
         assert "Sync now" not in home.text
-        assert 'hx-on:htmx:after-settle="var node = document.getElementById(\'form-error\')' in home.text
+        assert (
+            "hx-on:htmx:after-settle=\"var node = document.getElementById('form-error')"
+            in home.text
+        )
         assert 'href="/?lang=en"' in home.text
         assert 'href="/?lang=nl"' in home.text
         assert 'href="http' not in home.text
@@ -253,7 +266,10 @@ def test_admin_pages_and_field_errors(tmp_path: Path, monkeypatch) -> None:
         assert "no sync" in page.text
         assert "Turn off" in page.text
         assert "Edit" in page.text
-        assert "This removes the calendar from this hub, including its events." in page.text
+        assert (
+            "This removes the calendar from this hub, including its events."
+            in page.text
+        )
         assert "Enter a name." not in page.text
         assert "Sync now" not in page.text
         assert page.text.count('name="confirm" value="true"') == 1
@@ -340,7 +356,9 @@ def test_dutch_ui_keeps_english_json(tmp_path: Path, monkeypatch) -> None:
         _close(client)
 
 
-def test_errors_use_codes_and_keep_stored_sentences(tmp_path: Path, monkeypatch) -> None:
+def test_errors_use_codes_and_keep_stored_sentences(
+    tmp_path: Path, monkeypatch
+) -> None:
     client, _fake = _open(tmp_path, monkeypatch)
     try:
         missing = client.post("/sources?lang=nl", data={"name": "  "}, headers=HX)
@@ -351,13 +369,25 @@ def test_errors_use_codes_and_keep_stored_sentences(tmp_path: Path, monkeypatch)
         assert rejected.status_code == 422
         assert rejected.json()["detail"] == "Enter a name."
 
-        coded = _create(client, "Coded", kind="ics", ics_url="https://example.com/coded.ics")
-        legacy = _create(client, "Legacy", kind="ics", ics_url="https://example.com/legacy.ics")
-        unknown = _create(client, "Unknown", kind="ics", ics_url="https://example.com/unknown.ics")
+        coded = _create(
+            client, "Coded", kind="ics", ics_url="https://example.com/coded.ics"
+        )
+        legacy = _create(
+            client, "Legacy", kind="ics", ics_url="https://example.com/legacy.ics"
+        )
+        unknown = _create(
+            client, "Unknown", kind="ics", ics_url="https://example.com/unknown.ics"
+        )
         with Session(client.app.state.engine) as session, session.begin():
-            session.get(SyncState, coded["id"]).last_error_message = "sentence.event_saved"
-            session.get(SyncState, legacy["id"]).last_error_message = "The event could not be saved."
-            session.get(SyncState, unknown["id"]).last_error_message = "A custom operator note."
+            session.get(
+                SyncState, coded["id"]
+            ).last_error_message = "sentence.event_saved"
+            session.get(
+                SyncState, legacy["id"]
+            ).last_error_message = "The event could not be saved."
+            session.get(
+                SyncState, unknown["id"]
+            ).last_error_message = "A custom operator note."
         page = client.get("/sync?lang=nl")
         assert page.status_code == 200
         assert page.text.count("De afspraak kon niet worden opgeslagen.") >= 2

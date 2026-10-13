@@ -12,9 +12,12 @@ def _client(tmp_path: Path, monkeypatch) -> TestClient:
     return TestClient(create_app())
 
 
-def test_json_mutation_without_content_type_does_not_run(tmp_path: Path, monkeypatch) -> None:
+def test_json_mutation_without_content_type_does_not_run(
+    tmp_path: Path, monkeypatch
+) -> None:
     hit = {"value": False}
     with _client(tmp_path, monkeypatch) as client:
+
         @client.app.post("/api/guard-probe")
         def create_source() -> dict[str, bool]:
             hit["value"] = True
@@ -39,9 +42,12 @@ def test_json_mutation_without_content_type_does_not_run(tmp_path: Path, monkeyp
         assert hit["value"] is True
 
 
-def test_html_mutation_without_hx_request_does_not_run(tmp_path: Path, monkeypatch) -> None:
+def test_html_mutation_without_hx_request_does_not_run(
+    tmp_path: Path, monkeypatch
+) -> None:
     hit = {"value": False}
     with _client(tmp_path, monkeypatch) as client:
+
         @client.app.post("/source")
         def update_source() -> dict[str, bool]:
             hit["value"] = True
@@ -67,9 +73,12 @@ def test_webhook_is_exempt_from_json_requirement(tmp_path: Path, monkeypatch) ->
         assert "Traceback" not in response.text
 
 
-def test_unexpected_error_hides_cause_and_traceback(tmp_path: Path, monkeypatch, caplog) -> None:
+def test_unexpected_error_hides_cause_and_traceback(
+    tmp_path: Path, monkeypatch, caplog
+) -> None:
     secret = "super-secret-token"
     with _client(tmp_path, monkeypatch) as client:
+
         @client.app.get("/api/boom")
         def boom() -> None:
             raise RuntimeError(f"token={secret} summary=SecretTitle")
@@ -78,7 +87,10 @@ def test_unexpected_error_hides_cause_and_traceback(tmp_path: Path, monkeypatch,
             response = client.get("/api/boom")
 
     assert response.status_code == 500
-    assert response.json() == {"error": "internal_error", "detail": "Something went wrong."}
+    assert response.json() == {
+        "error": "internal_error",
+        "detail": "Something went wrong.",
+    }
     assert secret not in response.text
     assert "SecretTitle" not in response.text
     assert "Traceback" not in response.text

@@ -96,7 +96,9 @@ def import_source(
             on_invalid_cursor()
         raise Stopped()
     try:
-        stats = _apply_changes(engine, radicale, source_id, collection, timezone_name, snapshot, stop)
+        stats = _apply_changes(
+            engine, radicale, source_id, collection, timezone_name, snapshot, stop
+        )
     except (RunError, Stopped):
         if snapshot.cursor_invalidated:
             on_invalid_cursor()
@@ -124,13 +126,33 @@ def _apply_changes(
     blocked = False
     for change in snapshot.changes:
         if stop():
-            _count_changes(engine, radicale, source_id, collection, timezone_name, queued, stats, stop)
+            _count_changes(
+                engine,
+                radicale,
+                source_id,
+                collection,
+                timezone_name,
+                queued,
+                stats,
+                stop,
+            )
             raise Stopped(stats)
         if change.cancelled:
-            _count_changes(engine, radicale, source_id, collection, timezone_name, queued, stats, stop)
+            _count_changes(
+                engine,
+                radicale,
+                source_id,
+                collection,
+                timezone_name,
+                queued,
+                stats,
+                stop,
+            )
             queued = []
             try:
-                removed = delete_mapped(engine, radicale, source_id, collection, change.external_id)
+                removed = delete_mapped(
+                    engine, radicale, source_id, collection, change.external_id
+                )
             except RunError as exc:
                 reraise(exc, stats)
             if removed:
@@ -145,13 +167,17 @@ def _apply_changes(
             live += 1
         present.add(change.external_id)
         queued.append(change)
-    _count_changes(engine, radicale, source_id, collection, timezone_name, queued, stats, stop)
+    _count_changes(
+        engine, radicale, source_id, collection, timezone_name, queued, stats, stop
+    )
     if blocked:
         raise RunError(CAPACITY_MESSAGE, stats)
     if stop():
         raise Stopped(stats)
     if snapshot.full:
-        delete_absent_mapped(engine, radicale, source_id, collection, present, stats, stop)
+        delete_absent_mapped(
+            engine, radicale, source_id, collection, present, stats, stop
+        )
     return stats
 
 
@@ -226,7 +252,9 @@ def _object_from_change(change: GoogleChange, uid: str) -> CalendarObject:
         raise RunError(SAVE_MESSAGE)
     chosen: list = []
     for mark in change.master.exdates + change.added_exdates:
-        if not any(mark.value == item.value and mark.all_day == item.all_day for item in chosen):
+        if not any(
+            mark.value == item.value and mark.all_day == item.all_day for item in chosen
+        ):
             chosen.append(mark)
     master = replace(change.master, uid=uid, exdates=tuple(chosen))
     components = [master]
