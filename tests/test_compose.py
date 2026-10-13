@@ -185,7 +185,9 @@ def test_stack_cold_start(stack: dict[str, str]) -> None:
 
 
 @pytest.mark.integration
-def test_public_access_requires_owner_and_blocks_internal_account(stack: dict[str, str]) -> None:
+def test_public_access_requires_owner_and_blocks_internal_account(
+    stack: dict[str, str],
+) -> None:
     owner = _basic(stack["HUB_USER"], stack["HUB_PASSWORD"])
     internal = _basic(stack["HUB_INTERNAL_USER"], stack["HUB_INTERNAL_PASSWORD"])
 
@@ -283,11 +285,11 @@ def _json_call(
 
 def _propfind(path: str, auth: str) -> tuple[int, bytes]:
     body = (
-        "<?xml version='1.0' encoding='utf-8'?>"
-        "<D:propfind xmlns:D='DAV:' xmlns:A='http://apple.com/ns/ical/'>"
-        "<D:prop><D:displayname/><A:calendar-color/></D:prop>"
-        "</D:propfind>"
-    ).encode()
+        b"<?xml version='1.0' encoding='utf-8'?>"
+        b"<D:propfind xmlns:D='DAV:' xmlns:A='http://apple.com/ns/ical/'>"
+        b"<D:prop><D:displayname/><A:calendar-color/></D:prop>"
+        b"</D:propfind>"
+    )
     status, payload, _ = _https(
         "PROPFIND",
         path,
@@ -320,11 +322,11 @@ def test_private_collection_roundtrip(stack: dict[str, str]) -> None:
 
     event = collection + "event-1.ics"
     calendar = (
-        "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//calendar-hub//EN\r\n"
-        "BEGIN:VEVENT\r\nUID:event-1\r\nDTSTAMP:20261008T060000Z\r\n"
-        "DTSTART:20261008T090000Z\r\nDTEND:20261008T100000Z\r\n"
-        "SUMMARY:First title\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n"
-    ).encode()
+        b"BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//calendar-hub//EN\r\n"
+        b"BEGIN:VEVENT\r\nUID:event-1\r\nDTSTAMP:20261008T060000Z\r\n"
+        b"DTSTART:20261008T090000Z\r\nDTEND:20261008T100000Z\r\n"
+        b"SUMMARY:First title\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n"
+    )
     status, _, _ = _https(
         "PUT",
         event,
@@ -457,8 +459,8 @@ def test_webhook_upsert_is_readable_via_caldav(stack: dict[str, str]) -> None:
     )
     assert status == 200, raw[:300]
     assert headers.get("cache-control") == "no-store"
-    secret_match = re.search(br'id="webhook-secret-value"[^>]*>([^<]+)', raw)
-    url_match = re.search(br'id="webhook-url">([^<]+)', raw)
+    secret_match = re.search(rb'id="webhook-secret-value"[^>]*>([^<]+)', raw)
+    url_match = re.search(rb'id="webhook-url">([^<]+)', raw)
     assert secret_match is not None
     assert url_match is not None
     secret = secret_match.group(1).decode()
@@ -488,9 +490,9 @@ def test_webhook_upsert_is_readable_via_caldav(stack: dict[str, str]) -> None:
     source = next(item for item in listed["sources"] if item["id"] == source_id)
     collection = urlparse(source["collection_url"]).path
     list_body = (
-        "<?xml version='1.0' encoding='utf-8'?>"
-        "<D:propfind xmlns:D='DAV:'><D:prop><D:getetag/></D:prop></D:propfind>"
-    ).encode()
+        b"<?xml version='1.0' encoding='utf-8'?>"
+        b"<D:propfind xmlns:D='DAV:'><D:prop><D:getetag/></D:prop></D:propfind>"
+    )
     status, listing, _ = _https(
         "PROPFIND",
         collection,
@@ -498,7 +500,7 @@ def test_webhook_upsert_is_readable_via_caldav(stack: dict[str, str]) -> None:
         list_body,
     )
     assert status == 207, listing[:300]
-    hrefs = re.findall(br"href>([^<]+\.ics)", listing, flags=re.IGNORECASE)
+    hrefs = re.findall(rb"href>([^<]+\.ics)", listing, flags=re.IGNORECASE)
     assert hrefs
     stored = b""
     for href in hrefs:
@@ -622,7 +624,14 @@ def _memory_bytes(text: str) -> int:
 
 def _sample_hub(container: str) -> tuple[int, float]:
     stats = subprocess.run(
-        ["docker", "stats", "--no-stream", "--format", "{{.MemUsage}}\t{{.CPUPerc}}", container],
+        [
+            "docker",
+            "stats",
+            "--no-stream",
+            "--format",
+            "{{.MemUsage}}\t{{.CPUPerc}}",
+            container,
+        ],
         check=False,
         capture_output=True,
         text=True,
@@ -665,6 +674,7 @@ def _get_event(path: str, owner: str) -> tuple[str, bytes]:
 
 
 @pytest.mark.integration
+@pytest.mark.slow
 def test_large_ics_import_stays_within_memory_and_cpu(stack: dict[str, str]) -> None:
     count = _perf_event_count()
     timeout = _perf_timeout_seconds()
@@ -672,7 +682,9 @@ def test_large_ics_import_stays_within_memory_and_cpu(stack: dict[str, str]) -> 
     have = len(_sources(owner))
     assert have <= 19, have
     for number in range(19 - have):
-        status, created = _json_call("POST", "/api/sources", owner, {"name": f"Bench {number}"})
+        status, created = _json_call(
+            "POST", "/api/sources", owner, {"name": f"Bench {number}"}
+        )
         assert status == 201, created
     server, url = _feed_server(_calendar(count))
     try:
@@ -729,7 +741,9 @@ def test_large_ics_import_stays_within_memory_and_cpu(stack: dict[str, str]) -> 
         assert peak_memory < 512 * 1024 * 1024, peak_memory
         assert peak_cpu < 100, peak_cpu
         collection = urlparse(created["collection_url"]).path
-        status, stored, _ = _https("GET", f"{collection}e0.ics", {"Authorization": owner})
+        status, stored, _ = _https(
+            "GET", f"{collection}e0.ics", {"Authorization": owner}
+        )
         assert status == 200
         assert b"UID:e0" in stored
         assert b"SUMMARY:e0" in stored
@@ -739,10 +753,13 @@ def test_large_ics_import_stays_within_memory_and_cpu(stack: dict[str, str]) -> 
 
 
 @pytest.mark.integration
+@pytest.mark.slow
 def test_etag_stays_stable_across_twenty_propfinds(stack: dict[str, str]) -> None:
     owner = _basic(stack["HUB_USER"], stack["HUB_PASSWORD"])
     _make_room(owner, 2)
-    status, private = _json_call("POST", "/api/sources", owner, {"name": "Quiet private"})
+    status, private = _json_call(
+        "POST", "/api/sources", owner, {"name": "Quiet private"}
+    )
     assert status == 201, private
     collection = urlparse(private["collection_url"]).path
     event = f"{collection}quiet-1.ics"
@@ -791,7 +808,9 @@ def test_etag_stays_stable_across_twenty_propfinds(stack: dict[str, str]) -> Non
 def test_caldav_survives_hub_and_radicale_restarts(stack: dict[str, str]) -> None:
     owner = _basic(stack["HUB_USER"], stack["HUB_PASSWORD"])
     _make_room(owner, 1)
-    status, private = _json_call("POST", "/api/sources", owner, {"name": "Restart private"})
+    status, private = _json_call(
+        "POST", "/api/sources", owner, {"name": "Restart private"}
+    )
     assert status == 201, private
     collection = urlparse(private["collection_url"]).path
     event = f"{collection}restart-1.ics"

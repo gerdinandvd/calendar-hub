@@ -28,6 +28,8 @@ include = ["app*"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
+addopts = ["-m", "not integration and not slow"]
 markers = [
     "integration: needs Docker",
+    "slow: formal or long-running; skipped by default",
 ]

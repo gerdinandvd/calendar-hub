@@ -57,7 +57,9 @@ def _write_env(path: Path) -> None:
 def _env_map(service: dict) -> dict[str, str]:
     raw = service.get("environment") or {}
     if isinstance(raw, dict):
-        return {str(key): "" if value is None else str(value) for key, value in raw.items()}
+        return {
+            str(key): "" if value is None else str(value) for key, value in raw.items()
+        }
     found: dict[str, str] = {}
     for item in raw:
         text = str(item)
@@ -78,7 +80,9 @@ def _https(
     body: bytes | None = None,
 ) -> tuple[int, dict[str, str], bytes]:
     context = ssl._create_unverified_context()
-    connection = http.client.HTTPSConnection("localhost", PORT, context=context, timeout=20)
+    connection = http.client.HTTPSConnection(
+        "localhost", PORT, context=context, timeout=20
+    )
     try:
         connection.request(method, path, body=body, headers=headers or {})
         response = connection.getresponse()
@@ -155,8 +159,7 @@ def _replica_has(env_path: Path, names: tuple[str, ...], dest: Path) -> bool:
     connection = sqlite3.connect(dest)
     try:
         found = {
-            row[0]
-            for row in connection.execute("select name from sources").fetchall()
+            row[0] for row in connection.execute("select name from sources").fetchall()
         }
     except sqlite3.Error as exc:
         _replica_has.detail = str(exc)
@@ -200,6 +203,7 @@ def _docker_run(args: list[str]) -> subprocess.CompletedProcess[str]:
 
 
 @pytest.mark.integration
+@pytest.mark.slow
 def test_restore_exercise_brings_back_source_and_event(tmp_path: Path) -> None:
     env_path = tmp_path / "restore.env"
     _write_env(env_path)
@@ -210,10 +214,14 @@ def test_restore_exercise_brings_back_source_and_event(tmp_path: Path) -> None:
     try:
         if up.returncode != 0:
             logs = _compose(env_path, "logs", "--no-color")
-            raise AssertionError(up.stdout + "\n" + up.stderr + "\n" + logs.stdout + "\n" + logs.stderr)
+            raise AssertionError(
+                up.stdout + "\n" + up.stderr + "\n" + logs.stdout + "\n" + logs.stderr
+            )
 
         def kopia_ready() -> bool:
-            status = _compose(env_path, "exec", "-T", "backup", "cat", "/status/kopia-backup")
+            status = _compose(
+                env_path, "exec", "-T", "backup", "cat", "/status/kopia-backup"
+            )
             return status.returncode == 0 and bool(status.stdout.strip())
 
         _wait(kopia_ready, 180, "kopia did not write a status file")
@@ -229,8 +237,8 @@ def test_restore_exercise_brings_back_source_and_event(tmp_path: Path) -> None:
             b"name=Restore+hook",
         )
         assert status == 200, raw[:300]
-        secret_match = re.search(br'id="webhook-secret-value"[^>]*>([^<]+)', raw)
-        url_match = re.search(br'id="webhook-url">([^<]+)', raw)
+        secret_match = re.search(rb'id="webhook-secret-value"[^>]*>([^<]+)', raw)
+        url_match = re.search(rb'id="webhook-url">([^<]+)', raw)
         assert secret_match is not None
         assert url_match is not None
         secret = secret_match.group(1).decode()
@@ -249,11 +257,11 @@ def test_restore_exercise_brings_back_source_and_event(tmp_path: Path) -> None:
             collection = f"{collection}/"
         event = f"{collection}restore-1.ics"
         calendar = (
-            "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//calendar-hub//EN\r\n"
-            "BEGIN:VEVENT\r\nUID:restore-1\r\nDTSTAMP:20261010T120000Z\r\n"
-            "DTSTART:20261010T090000Z\r\nDTEND:20261010T100000Z\r\n"
-            "SUMMARY:Restore title\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n"
-        ).encode()
+            b"BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//calendar-hub//EN\r\n"
+            b"BEGIN:VEVENT\r\nUID:restore-1\r\nDTSTAMP:20261010T120000Z\r\n"
+            b"DTSTART:20261010T090000Z\r\nDTEND:20261010T100000Z\r\n"
+            b"SUMMARY:Restore title\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n"
+        )
         status, _, stored = _https(
             "PUT",
             event,
@@ -265,15 +273,28 @@ def test_restore_exercise_brings_back_source_and_event(tmp_path: Path) -> None:
         check_db = tmp_path / "check.sqlite"
         try:
             _wait(
-                lambda: _replica_has(env_path, ("Restore private", "Restore hook"), check_db),
+                lambda: _replica_has(
+                    env_path, ("Restore private", "Restore hook"), check_db
+                ),
                 120,
                 "litestream replica did not contain the source rows",
             )
         except AssertionError as exc:
-            logs = _compose(env_path, "logs", "--no-color", "--tail", "60", "litestream")
+            logs = _compose(
+                env_path, "logs", "--no-color", "--tail", "60", "litestream"
+            )
             detail = getattr(_replica_has, "detail", "")
             raise AssertionError(f"{exc}\n{detail}\n{logs.stdout[-2000:]}") from None
-        snapshot = _compose(env_path, "exec", "-T", "backup", "/bin/kopia", "snapshot", "create", "/source")
+        snapshot = _compose(
+            env_path,
+            "exec",
+            "-T",
+            "backup",
+            "/bin/kopia",
+            "snapshot",
+            "create",
+            "/source",
+        )
         assert snapshot.returncode == 0, snapshot.stdout + "\n" + snapshot.stderr
 
         _key_absent(env_path, "litestream", "/replica", values["HUB_SECRET_KEY"])
@@ -302,7 +323,9 @@ def test_restore_exercise_brings_back_source_and_event(tmp_path: Path) -> None:
                 "restore",
             ],
         )
-        assert sqlite_restore.returncode == 0, sqlite_restore.stdout + "\n" + sqlite_restore.stderr
+        assert sqlite_restore.returncode == 0, (
+            sqlite_restore.stdout + "\n" + sqlite_restore.stderr
+        )
         radicale_restore = _docker_run(
             [
                 "run",
@@ -332,13 +355,25 @@ def test_restore_exercise_brings_back_source_and_event(tmp_path: Path) -> None:
                 "restore",
             ],
         )
-        assert radicale_restore.returncode == 0, radicale_restore.stdout + "\n" + radicale_restore.stderr
+        assert radicale_restore.returncode == 0, (
+            radicale_restore.stdout + "\n" + radicale_restore.stderr
+        )
         again = _compose(env_path, "up", "-d", "--wait")
         if again.returncode != 0:
             logs = _compose(env_path, "logs", "--no-color")
-            raise AssertionError(again.stdout + "\n" + again.stderr + "\n" + logs.stdout + "\n" + logs.stderr)
+            raise AssertionError(
+                again.stdout
+                + "\n"
+                + again.stderr
+                + "\n"
+                + logs.stdout
+                + "\n"
+                + logs.stderr
+            )
 
-        status, _headers, listed = _https("GET", "/api/sources", {"Authorization": owner})
+        status, _headers, listed = _https(
+            "GET", "/api/sources", {"Authorization": owner}
+        )
         assert status == 200, listed
         names = {item["name"] for item in json.loads(listed)["sources"]}
         assert "Restore private" in names

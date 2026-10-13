@@ -7,10 +7,21 @@ Personal hub that puts calendar sources in one place. The stack starts five serv
 ```text
 python -m venv .venv
 .venv\Scripts\python -m pip install -e ".[dev]"
-.venv\Scripts\pytest -m "not integration"
+.venv\Scripts\pytest
 ```
 
-On Linux or macOS the venv points at `.venv/bin/python` instead of `.venv\Scripts\python`.
+Plain `pytest` skips Docker integration and formal/long (`slow`) tests. On Linux or macOS the venv points at `.venv/bin/python` instead of `.venv\Scripts\python`.
+
+## Lint
+
+Dev install includes Ruff. Format and lint `app/` and `tests/`:
+
+```text
+.venv\Scripts\ruff check app tests
+.venv\Scripts\ruff format app tests
+```
+
+Optional on-commit hooks: `pre-commit install` (see `.pre-commit-config.yaml`). Tool roles are described in `docs/python-toolchain.md`.
 
 ## Stack
 
@@ -44,18 +55,16 @@ docker compose down
 
 ## Cold start as a test
 
-The integration test starts the stack, checks TLS, basic auth, and CalDAV, and stops it again including volumes. Docker has to be running for that.
-
-The large ICS import defaults to 200 events and a 60 second timeout as a regression smoke. That is not the formal T-03 / PQ-PE measure from the design (5,000 events within 10 minutes). Set the environment variables below for the full run.
+Integration smoke starts the stack, checks TLS, basic auth, and CalDAV, and stops it again including volumes. Docker has to be running for that. Formal/long checks (`slow`) stay out of the default and smoke runs.
 
 ```text
-.venv\Scripts\pytest -m integration
+.venv\Scripts\pytest -m "integration and not slow"
 ```
+
+The large ICS import is marked `slow`. It defaults to 200 events and a 60 second timeout. That is not the formal T-03 / PQ-PE measure from the design (5,000 events within 10 minutes). Set the environment variables below for the full run:
 
 ```text
 set PERF_EVENT_COUNT=5000
 set PERF_TIMEOUT_SECONDS=600
-.venv\Scripts\pytest -m integration -k large_ics_import
+.venv\Scripts\pytest -m slow -k large_ics_import
 ```
-
-`pytest` without a marker runs the ordinary tests and this cold start together.

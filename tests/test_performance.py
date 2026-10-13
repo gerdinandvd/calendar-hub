@@ -5,6 +5,8 @@ import threading
 import time
 from pathlib import Path
 
+import pytest
+
 import test_ics as ics_tests
 from app.sync.runner import wait_for
 
@@ -50,7 +52,9 @@ def test_sync_start_answers_within_a_second(tmp_path: Path, monkeypatch) -> None
         feed.default = ics_tests._calendar(*ics_tests._event("one"))
         created = ics_tests._create(client, f"{base}/feed.ics", name="Feed")
         source_id = created["id"]
-        private = client.post("/api/sources", json={"name": "Home"}, headers=ics_tests.JSON)
+        private = client.post(
+            "/api/sources", json={"name": "Home"}, headers=ics_tests.JSON
+        )
         hook = client.post(
             "/api/sources",
             json={"name": "Hook", "kind": "webhook"},
@@ -96,7 +100,10 @@ def test_sync_start_answers_within_a_second(tmp_path: Path, monkeypatch) -> None
         ics_tests._close_server(server)
 
 
-def test_five_thousand_events_finish_within_ten_minutes(tmp_path: Path, monkeypatch) -> None:
+@pytest.mark.slow
+def test_five_thousand_events_finish_within_ten_minutes(
+    tmp_path: Path, monkeypatch
+) -> None:
     feed = ics_tests.Feed()
     server, base = ics_tests._server(feed)
     client, fake = ics_tests._open(tmp_path, monkeypatch)
