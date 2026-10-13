@@ -17,6 +17,7 @@ dev = [
     "pytest>=8,<9",
     "httpx>=0.27,<1",
     "ruff==0.17.0",
+    "pylint==4.1.3",
 ]
 
 [build-system]
@@ -52,3 +53,47 @@ select = [
 
 [tool.ruff.lint.isort]
 known-first-party = ["app"]
+
+[tool.pylint.main]
+py-version = "3.12"
+jobs = 0
+ignore-paths = [
+    "^tests/",
+    "^deploy/",
+]
+
+[tool.pylint.messages_control]
+disable = ["all"]
+enable = [
+    "duplicate-code",
+    "too-many-ancestors",
+    "too-many-arguments",
+    "too-many-branches",
+    "too-many-instance-attributes",
+    "too-many-locals",
+    "too-many-nested-blocks",
+    "too-many-public-methods",
+    "too-many-return-statements",
+    "too-many-statements",
+]
+
+[tool.pylint.design]
+# Calibrated to current app/; tighten only, do not raise without review.
+max-args = 12
+max-attributes = 15
+max-bool-expr = 5
+max-branches = 28
+max-locals = 38
+max-parents = 7
+max-public-methods = 20
+max-returns = 13
+max-statements = 89
+max-nested-blocks = 5
+
+[tool.pylint.similarities]
+# Floor for current app/; small shared helpers still trip default 4-line matches.
+min-similarity-lines = 20
+ignore-comments = true
+ignore-docstrings = true
+ignore-imports = true
+ignore-signatures = true

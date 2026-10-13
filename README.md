@@ -14,14 +14,16 @@ Plain `pytest` skips Docker integration and formal/long (`slow`) tests. On Linux
 
 ## Lint
 
-Dev install includes Ruff. Format and lint `app/` and `tests/`:
+Dev install includes Ruff, Pylint, and Pyright. Format and lint with Ruff on `app/` and `tests/`; run Pylint design checks and Pyright type checks on `app/`:
 
 ```text
 .venv\Scripts\ruff check app tests
 .venv\Scripts\ruff format app tests
+.venv\Scripts\pylint app
+.venv\Scripts\pyright
 ```
 
-Optional on-commit hooks: `pre-commit install` (see `.pre-commit-config.yaml`). Tool roles are described in `docs/python-toolchain.md`.
+Optional on-commit hooks: `pre-commit install` (see `.pre-commit-config.yaml`; Ruff and Pyright). Tool roles are described in `docs/python-toolchain.md`.
 
 ## Stack
 
