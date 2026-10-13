@@ -10,10 +10,10 @@ from fastapi.responses import JSONResponse
 
 from app.access import json_error
 from app.i18n import english
-from app.secrets import SecretKeyError
 from app.services.sources import (
     WebhookApplyError,
     WebhookPayloadError,
+    WebhookSecretError,
     apply_webhook_payload,
     get_source,
     webhook_secret_matches,
@@ -59,7 +59,7 @@ async def receive(source_id: str, request: Request) -> dict | JSONResponse:
     provided = request.headers.get("x-webhook-secret", "")
     try:
         matches = webhook_secret_matches(request.app.state.engine, source_id, provided)
-    except SecretKeyError as exc:
+    except WebhookSecretError as exc:
         return json_error(500, "internal_error", str(exc))
     if not matches:
         return json_error(401, "invalid_secret", "The webhook secret is not valid.")

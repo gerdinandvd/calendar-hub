@@ -70,6 +70,11 @@ class WebhookApplyError(Exception):
         self.message = message
 
 
+class WebhookSecretError(Exception):
+    def __init__(self, message: str) -> None:
+        self.message = message
+
+
 class GoogleConnectError(Exception):
     """OAuth connect failed. reason is config, scope, or token."""
 
@@ -545,10 +550,13 @@ def webhook_secret_matches(engine: Engine, source_id: str, provided: str) -> boo
     with Session(engine) as session:
         row = session.get(SourceSecret, source_id)
         stored = row.webhook_secret if row is not None else None
-    if not stored:
-        equal(provided, "missing-webhook-secret")
-        return False
-    return equal(decrypt(stored), provided)
+    try:
+        if not stored:
+            equal(provided, "missing-webhook-secret")
+            return False
+        return equal(decrypt(stored), provided)
+    except SecretKeyError as exc:
+        raise WebhookSecretError(str(exc)) from None
 
 
 def endpoint_url(source_id: str) -> str:
