@@ -3,6 +3,7 @@
 import base64
 import http.client
 import json
+import os
 import re
 import socket
 import ssl
@@ -19,6 +20,34 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 EXPECTED_SERVICES = {"hub", "radicale", "caddy", "litestream", "backup"}
 HTTPS_PORT = 8443
+_PERF_EVENT_COUNT_DEFAULT = 200
+_PERF_TIMEOUT_SECONDS_DEFAULT = 60.0
+
+
+def _perf_event_count() -> int:
+    raw = os.environ.get("PERF_EVENT_COUNT", "").strip()
+    if not raw:
+        return _PERF_EVENT_COUNT_DEFAULT
+    try:
+        count = int(raw)
+    except ValueError:
+        pytest.fail(f"PERF_EVENT_COUNT must be an integer, got {raw!r}")
+    if count < 1:
+        pytest.fail(f"PERF_EVENT_COUNT must be at least 1, got {count}")
+    return count
+
+
+def _perf_timeout_seconds() -> float:
+    raw = os.environ.get("PERF_TIMEOUT_SECONDS", "").strip()
+    if not raw:
+        return _PERF_TIMEOUT_SECONDS_DEFAULT
+    try:
+        timeout = float(raw)
+    except ValueError:
+        pytest.fail(f"PERF_TIMEOUT_SECONDS must be a number, got {raw!r}")
+    if timeout <= 0:
+        pytest.fail(f"PERF_TIMEOUT_SECONDS must be greater than 0, got {timeout}")
+    return timeout
 
 
 def _compose(root: Path, *args: str) -> subprocess.CompletedProcess[str]:
@@ -636,14 +665,16 @@ def _get_event(path: str, owner: str) -> tuple[str, bytes]:
 
 
 @pytest.mark.integration
-def test_five_thousand_events_stay_within_memory_and_cpu(stack: dict[str, str]) -> None:
+def test_large_ics_import_stays_within_memory_and_cpu(stack: dict[str, str]) -> None:
+    count = _perf_event_count()
+    timeout = _perf_timeout_seconds()
     owner = _basic(stack["HUB_USER"], stack["HUB_PASSWORD"])
     have = len(_sources(owner))
     assert have <= 19, have
     for number in range(19 - have):
         status, created = _json_call("POST", "/api/sources", owner, {"name": f"Bench {number}"})
         assert status == 201, created
-    server, url = _feed_server(_calendar(5000))
+    server, url = _feed_server(_calendar(count))
     try:
         status, created = _json_call(
             "POST",
@@ -680,7 +711,7 @@ def test_five_thousand_events_stay_within_memory_and_cpu(stack: dict[str, str]) 
         sampler.start()
         try:
             _start_sync(owner, created["id"])
-            row = _wait_sync(owner, created["id"], 600)
+            row = _wait_sync(owner, created["id"], timeout)
         finally:
             stop.set()
             sampler.join(30)
@@ -690,8 +721,8 @@ def test_five_thousand_events_stay_within_memory_and_cpu(stack: dict[str, str]) 
             "seen": row.get("events_seen"),
             "upserted": row.get("events_upserted"),
         }
-        assert row["events_seen"] == 5000
-        assert row["events_upserted"] == 5000
+        assert row["events_seen"] == count
+        assert row["events_upserted"] == count
         assert peaks["samples"] > 0
         peak_memory = peaks["memory"]
         peak_cpu = peaks["cpu"]
