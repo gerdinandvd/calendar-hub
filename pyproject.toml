@@ -19,6 +19,7 @@ dev = [
     "ruff==0.17.0",
     "pylint==4.1.3",
     "pyright==1.1.414",
+    "import-linter==2.15",
 ]
 
 [build-system]
@@ -54,7 +55,6 @@ select = [
 
 [tool.ruff.lint.isort]
 known-first-party = ["app"]
-
 
 [tool.pyright]
 include = ["app"]
@@ -107,3 +107,46 @@ ignore-comments = true
 ignore-docstrings = true
 ignore-imports = true
 ignore-signatures = true
+
+[tool.importlinter]
+root_package = "app"
+
+[[tool.importlinter.contracts]]
+name = "Sync importers and Radicale client are independent"
+type = "independence"
+modules = [
+    "app.sync.google",
+    "app.sync.ics",
+    "app.sync.webhook",
+    "app.radicale.client",
+]
+# Shared writer may call Radicale; importers must not import the client themselves.
+ignore_imports = [
+    "app.sync.apply -> app.radicale.client",
+]
+
+[[tool.importlinter.contracts]]
+name = "UI must not import sync importers or Radicale client"
+type = "forbidden"
+source_modules = [
+    "app.ui",
+]
+forbidden_modules = [
+    "app.sync.google",
+    "app.sync.ics",
+    "app.sync.webhook",
+    "app.radicale.client",
+]
+# UI may reach sync/Radicale only via services/health; direct imports are banned.
+allow_indirect_imports = true
+
+[[tool.importlinter.contracts]]
+name = "Layered architecture"
+type = "layers"
+layers = [
+    "app.main",
+    "app.api | app.ui",
+    "app.services | app.health | app.i18n",
+    "app.sync",
+    "app.radicale | app.db",
+]

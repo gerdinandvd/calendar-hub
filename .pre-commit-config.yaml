@@ -14,3 +14,9 @@ repos:
         language: system
         types: [python]
         pass_filenames: false
+      - id: import-linter
+        name: import-linter
+        entry: lint-imports
+        language: system
+        types: [python]
+        pass_filenames: false
