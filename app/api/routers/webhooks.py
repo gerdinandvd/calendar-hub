@@ -10,7 +10,7 @@ from fastapi.responses import JSONResponse
 
 from app.access import json_error
 from app.ui.text import english
-from app.api.sources import get_source, webhook_secret_matches
+from app.api.services.sources import get_source, webhook_secret_matches
 from app.secrets import SecretKeyError
 from app.sync.runner import SyncFailed, run_webhook
 from app.sync.webhook import ParseError, parse

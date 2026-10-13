@@ -9,7 +9,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
-from app.api.sources import ensure_sync_states
+from app.api.services.sources import ensure_sync_states
 from app.db.models import EventMapping, SourceSecret, SyncState
 from app.main import create_app
 from app.radicale.client import RadicaleError

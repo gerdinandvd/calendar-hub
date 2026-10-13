@@ -8,24 +8,17 @@ from datetime import datetime, timezone
 from urllib.parse import quote, urlsplit
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from fastapi import APIRouter, Request
-from fastapi.responses import JSONResponse
-from pydantic import BaseModel, ConfigDict
 from sqlalchemy import delete, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session
 
-from app.access import json_error
-from app.ui.text import english
 from app.db.models import EventMapping, Source, SourceSecret, SyncState
 from app.log import log_mutation
 from app.radicale.client import RadicaleClient, RadicaleError
 from app.secrets import SecretKeyError, decrypt, encrypt, equal
 from app.sync.runner import SlotBusy, SyncRejected
 from app.sync.runner import start_sync as launch_sync
-
-router = APIRouter()
 
 MAX_SOURCES = 20
 DEFAULT_TIMEZONE = "Europe/Amsterdam"
@@ -76,34 +69,6 @@ class _IcsReady:
 class _GoogleReady:
     calendar_id: str
     poll_seconds: int
-
-
-class SourceCreate(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    name: str
-    timezone: str | None = None
-    enabled: int | None = None
-    kind: str = "private"
-    ics_url: str | None = None
-    ics_allow_http: int | None = None
-    poll_seconds: int | None = None
-    ics_authorization_header: str | None = None
-    google_calendar_id: str | None = None
-
-
-class SourcePatch(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    name: str | None = None
-    timezone: str | None = None
-    enabled: int | None = None
-    ics_url: str | None = None
-    ics_allow_http: int | None = None
-    poll_seconds: int | None = None
-    ics_authorization_header: str | None = None
-    clear_ics_authorization: int | None = None
-    google_calendar_id: str | None = None
 
 
 def create_source(
@@ -523,88 +488,6 @@ def list_calendars(engine: Engine) -> list[dict]:
     return calendars
 
 
-@router.get("/api/sources")
-def read_sources(request: Request) -> dict:
-    return {"sources": list_sources(request.app.state.engine)}
-
-
-@router.post("/api/sources", status_code=201)
-def post_source(body: SourceCreate, request: Request) -> dict:
-    result = create_source(
-        request.app.state.engine,
-        request.app.state.radicale,
-        name=body.name,
-        timezone_name=body.timezone,
-        enabled=body.enabled,
-        kind=body.kind,
-        ics_url=body.ics_url,
-        ics_allow_http=body.ics_allow_http,
-        poll_seconds=body.poll_seconds,
-        ics_authorization_header=body.ics_authorization_header,
-        google_calendar_id=body.google_calendar_id,
-    )
-    return _json(result)
-
-
-@router.get("/api/sources/{source_id}")
-def read_source(source_id: str, request: Request) -> dict:
-    found = get_source(request.app.state.engine, source_id)
-    if found is None:
-        return _json(_failure(404, "sentence.not_found"))
-    return found
-
-
-@router.patch("/api/sources/{source_id}")
-def patch_source(source_id: str, body: SourcePatch, request: Request) -> dict:
-    result = update_source(
-        request.app.state.engine,
-        request.app.state.radicale,
-        source_id,
-        name=body.name,
-        timezone_name=body.timezone,
-        enabled=body.enabled,
-        ics_url=body.ics_url,
-        ics_allow_http=body.ics_allow_http,
-        poll_seconds=body.poll_seconds,
-        ics_authorization_header=body.ics_authorization_header,
-        clear_ics_authorization=body.clear_ics_authorization == 1,
-        google_calendar_id=body.google_calendar_id,
-    )
-    return _json(result)
-
-
-@router.post("/api/sources/{source_id}/sync", response_model=None)
-def post_sync(source_id: str, request: Request) -> dict | JSONResponse:
-    result = start_sync(request.app.state.engine, request.app.state.radicale, source_id)
-    if isinstance(result, SourceFailure):
-        return json_error(result.status, result.error, english(result.detail))
-    return JSONResponse(result, status_code=202)
-
-
-@router.post("/api/sources/{source_id}/rotate-secret")
-def rotate_secret(source_id: str, request: Request) -> dict:
-    result = rotate_webhook_secret(request.app.state.engine, source_id, reveal=False)
-    return _json(result)
-
-
-@router.delete("/api/sources/{source_id}")
-def remove_source(source_id: str, request: Request, confirm: bool = False) -> dict:
-    result = delete_source(
-        request.app.state.engine,
-        request.app.state.radicale,
-        source_id,
-        confirm=confirm,
-    )
-    if result is None:
-        return {"deleted": True}
-    return _json(result)
-
-
-@router.get("/api/calendars")
-def read_calendars(request: Request) -> dict:
-    return {"calendars": list_calendars(request.app.state.engine)}
-
-
 class ConfigError(Exception):
     pass
 
@@ -615,12 +498,6 @@ class _LimitReached(Exception):
 
 class _Missing(Exception):
     pass
-
-
-def _json(result: dict | SourceFailure) -> dict:
-    if isinstance(result, SourceFailure):
-        return json_error(result.status, result.error, english(result.detail))
-    return result
 
 
 def _failure(

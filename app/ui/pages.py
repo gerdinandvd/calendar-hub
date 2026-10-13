@@ -7,9 +7,9 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.templating import Jinja2Templates
 
-from app.api.caldav_info import build_caldav_info
-from app.api.health import report as health_report
-from app.api.sources import (
+from app.api.routers.caldav_info import build_caldav_info
+from app.api.routers.health import report as health_report
+from app.api.services.sources import (
     DEFAULT_POLL_SECONDS,
     GOOGLE_POLL_SECONDS,
     SourceFailure,

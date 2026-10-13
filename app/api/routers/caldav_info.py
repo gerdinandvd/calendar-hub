@@ -5,7 +5,7 @@ import os
 from fastapi import APIRouter, Request
 from sqlalchemy.engine import Engine
 
-from app.api.sources import list_sources
+from app.api.services.sources import list_sources
 
 router = APIRouter()
 

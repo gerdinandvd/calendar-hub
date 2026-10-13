@@ -2,7 +2,7 @@
 
 from fastapi import APIRouter, Request
 
-from app.api.sources import list_sync_status
+from app.api.services.sources import list_sync_status
 
 router = APIRouter()
 

@@ -6,16 +6,16 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from app.access import install_access
-from app.api.caldav_info import router as caldav_router
-from app.api.health import Heartbeat
-from app.api.health import router as health_router
-from app.api.oauth import OAuthStates
-from app.api.oauth import router as oauth_router
-from app.api.sources import ensure_sync_states
-from app.api.sources import router as sources_router
-from app.api.sync import router as sync_router
-from app.api.webhooks import RateLimiter
-from app.api.webhooks import router as webhooks_router
+from app.api.routers.caldav_info import router as caldav_router
+from app.api.routers.health import Heartbeat
+from app.api.routers.health import router as health_router
+from app.api.routers.oauth import OAuthStates
+from app.api.routers.oauth import router as oauth_router
+from app.api.routers.sources import router as sources_router
+from app.api.routers.sync import router as sync_router
+from app.api.routers.webhooks import RateLimiter
+from app.api.routers.webhooks import router as webhooks_router
+from app.api.services.sources import ensure_sync_states
 from app.db.models import Base
 from app.db.session import make_engine
 from app.log import configure_logging

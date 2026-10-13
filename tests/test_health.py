@@ -6,7 +6,7 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
-from app.api.health import (
+from app.api.routers.health import (
     KOPIA_ERROR,
     LITESTREAM_ERROR,
     RADICALE_ERROR,
