@@ -1,33 +1,51 @@
+:root {
+  --primary: #181818;
+  --accent: #97512d;
+  --background: #eee9de;
+  --gold: #b69968;
+  --muted: #6c685f;
+}
+
 body {
   margin: 0;
-  color: #1f1f1f;
-  background: #fff;
+  color: var(--primary);
+  background: var(--background);
   font-family: "Segoe UI", sans-serif;
   line-height: 1.5;
 }
 
-header, main {
-  max-width: 44rem;
+header,
+main {
+  max-width: 52rem;
   margin: 0 auto;
   padding: 1rem 1.25rem;
 }
 
+main {
+  overflow-x: auto;
+}
+
 header {
   display: flex;
+  flex-wrap: wrap;
   justify-content: space-between;
   align-items: baseline;
-  gap: 1rem;
-  border-bottom: 1px solid #ddd;
+  gap: 0.75rem 1.25rem;
+  border-bottom: 3px solid var(--gold);
 }
 
 nav {
   display: flex;
-  gap: 1rem;
+  flex-wrap: wrap;
+  gap: 0.35rem 1rem;
 }
 
 nav a[aria-current="page"] {
+  color: var(--primary);
   font-weight: 600;
-  text-decoration: underline;
+  text-decoration-color: var(--gold);
+  text-decoration-thickness: 2px;
+  text-underline-offset: 0.2em;
 }
 
 .brand {
@@ -35,7 +53,31 @@ nav a[aria-current="page"] {
   font-weight: 600;
 }
 
-label, button, input {
+.lang {
+  margin: 0 0 0 auto;
+}
+
+.lang a {
+  color: var(--muted);
+}
+
+h1,
+h2 {
+  font-weight: 600;
+}
+
+h1 {
+  font-size: 1.4rem;
+  margin: 0.25rem 0 0.75rem;
+}
+
+h2 {
+  font-size: 1.1rem;
+}
+
+label,
+button,
+input {
   font: inherit;
 }
 
@@ -48,57 +90,126 @@ input {
   display: block;
   width: 100%;
   max-width: 24rem;
+  box-sizing: border-box;
   padding: 0.35rem 0.5rem;
+  color: var(--primary);
+  background: var(--background);
+  border: 1px solid var(--muted);
+  border-radius: 0.25rem;
 }
 
-button, a {
-  color: #0b3d91;
+input[type="checkbox"] {
+  display: inline-block;
+  width: auto;
+  margin-top: 0.35rem;
+  accent-color: var(--accent);
+}
+
+button,
+a {
+  color: var(--accent);
 }
 
 button {
   margin-top: 0.75rem;
   padding: 0.35rem 0.7rem;
-  background: #fff;
-  border: 1px solid #0b3d91;
+  background: var(--background);
+  border: 1px solid var(--accent);
   border-radius: 0.25rem;
+  cursor: pointer;
 }
 
-a:focus-visible, button:focus-visible, input:focus-visible {
-  outline: 2px solid #1a73e8;
+button:hover {
+  color: var(--primary);
+  background: var(--gold);
+  border-color: var(--gold);
+}
+
+td button,
+dialog button {
+  margin-top: 0;
+  white-space: nowrap;
+}
+
+a:focus-visible,
+button:focus-visible,
+input:focus-visible {
+  outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
 
 table {
-  width: 100%;
+  width: max-content;
+  min-width: 100%;
   border-collapse: collapse;
 }
 
-th, td {
+th,
+td {
   text-align: left;
-  padding: 0.4rem 0.5rem 0.4rem 0;
+  padding: 0.45rem 0.75rem 0.45rem 0;
   vertical-align: top;
+  border-bottom: 1px solid var(--gold);
+}
+
+th {
+  color: var(--muted);
+  font-weight: 600;
+}
+
+dt {
+  margin-top: 0.5rem;
+  color: var(--muted);
+}
+
+dd {
+  margin: 0;
+}
+
+input + p {
+  max-width: 24rem;
+  margin: 0.25rem 0 0;
+  color: var(--muted);
 }
 
 .swatch {
   display: inline-block;
   width: 1rem;
   height: 1rem;
-  border: 1px solid #ccc;
+  border: 1px solid var(--muted);
   vertical-align: text-bottom;
 }
 
-#error, #form-error, .field-error {
-  color: #8a1f11;
+#error,
+#form-error,
+.field-error,
+[id$="-error"] {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+#source-saved {
+  margin-left: 0;
+  padding-left: 0.6rem;
+  border-left: 3px solid var(--gold);
 }
 
 dialog {
-  border: 1px solid #ccc;
+  color: var(--primary);
+  background: var(--background);
+  border: 1px solid var(--gold);
   max-width: 28rem;
   padding: 1rem;
 }
 
 dialog::backdrop {
-  background: rgba(0, 0, 0, 0.35);
+  background: rgb(24 24 24 / 35%);
+}
+
+dialog form {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
 }
 
 form {
@@ -106,6 +217,11 @@ form {
 }
 
 .secret {
+  max-width: 24rem;
+  margin: 0.5rem 0;
+  padding: 0.5rem 0.65rem;
   overflow-wrap: anywhere;
   font-family: Consolas, monospace;
+  color: var(--primary);
+  background: var(--gold);
 }
