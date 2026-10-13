@@ -5,6 +5,7 @@ from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from typing import NoReturn
 from urllib.parse import quote
 
 from sqlalchemy import select
@@ -48,7 +49,7 @@ class ImportResult:
     save_cursor: bool = False
 
 
-def reraise(exc: RunError | Stopped, stats: RunStats) -> None:
+def reraise(exc: RunError | Stopped, stats: RunStats) -> NoReturn:
     """Raise the same failure with the counts gathered so far."""
 
     if isinstance(exc, Stopped):

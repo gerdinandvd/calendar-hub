@@ -700,17 +700,18 @@ def merge_partial(
             continue
         kept.append(replace(item, uid=uid))
     for incoming in exceptions:
-        if incoming.recurrence_id is None:
+        recurrence_id = incoming.recurrence_id
+        if recurrence_id is None:
             raise CalendarParseError()
         event = replace(incoming, uid=uid)
-        if _mark_in(event.recurrence_id, base.exdates):
+        if _mark_in(recurrence_id, base.exdates):
             continue
         index = next(
             (
                 position
                 for position, item in enumerate(kept)
                 if item.recurrence_id is not None
-                and _mark_in(event.recurrence_id, (item.recurrence_id,))
+                and _mark_in(recurrence_id, (item.recurrence_id,))
             ),
             None,
         )

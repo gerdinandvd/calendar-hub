@@ -314,7 +314,10 @@ def _health_view(request: Request) -> dict[str, object]:
     shown = dict(report)
     for key in ("radicale_error", "litestream_error", "kopia_error"):
         shown[key] = _sentence(request, str(report.get(key) or ""))
-    shown["disk_free"] = _format_bytes(int(report["disk_free_bytes"]))
+    free = report["disk_free_bytes"]
+    if not isinstance(free, int):
+        raise TypeError("disk_free_bytes")
+    shown["disk_free"] = _format_bytes(free)
     return shown
 
 

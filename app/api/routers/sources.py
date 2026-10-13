@@ -27,7 +27,7 @@ def read_sources(request: Request) -> dict:
 
 
 @router.post("/api/sources", status_code=201)
-def post_source(body: SourceCreate, request: Request) -> dict:
+def post_source(body: SourceCreate, request: Request) -> dict | JSONResponse:
     result = create_source(
         request.app.state.engine,
         request.app.state.radicale,
@@ -45,7 +45,7 @@ def post_source(body: SourceCreate, request: Request) -> dict:
 
 
 @router.get("/api/sources/{source_id}")
-def read_source(source_id: str, request: Request) -> dict:
+def read_source(source_id: str, request: Request) -> dict | JSONResponse:
     found = get_source(request.app.state.engine, source_id)
     if found is None:
         return _json(SourceFailure(404, "not_found", "sentence.not_found"))
@@ -53,7 +53,9 @@ def read_source(source_id: str, request: Request) -> dict:
 
 
 @router.patch("/api/sources/{source_id}")
-def patch_source(source_id: str, body: SourcePatch, request: Request) -> dict:
+def patch_source(
+    source_id: str, body: SourcePatch, request: Request
+) -> dict | JSONResponse:
     result = update_source(
         request.app.state.engine,
         request.app.state.radicale,
@@ -80,13 +82,15 @@ def post_sync(source_id: str, request: Request) -> dict | JSONResponse:
 
 
 @router.post("/api/sources/{source_id}/rotate-secret")
-def rotate_secret(source_id: str, request: Request) -> dict:
+def rotate_secret(source_id: str, request: Request) -> dict | JSONResponse:
     result = rotate_webhook_secret(request.app.state.engine, source_id, reveal=False)
     return _json(result)
 
 
 @router.delete("/api/sources/{source_id}")
-def remove_source(source_id: str, request: Request, confirm: bool = False) -> dict:
+def remove_source(
+    source_id: str, request: Request, confirm: bool = False
+) -> dict | JSONResponse:
     result = delete_source(
         request.app.state.engine,
         request.app.state.radicale,
@@ -103,7 +107,7 @@ def read_calendars(request: Request) -> dict:
     return {"calendars": list_calendars(request.app.state.engine)}
 
 
-def _json(result: dict | SourceFailure) -> dict:
+def _json(result: dict | SourceFailure) -> dict | JSONResponse:
     if isinstance(result, SourceFailure):
         return json_error(result.status, result.error, english(result.detail))
     return result
