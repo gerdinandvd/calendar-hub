@@ -1,0 +1,8 @@
+---
+description: Run Ruff format before commits
+alwaysApply: true
+---
+
+# Ruff before commit
+
+Before committing Python changes, run `.venv\Scripts\ruff format` (or `.venv/bin/ruff format` on Unix) on the touched files, then stage. Do this before `git commit` so pre-commit does not rewrite files mid-commit.

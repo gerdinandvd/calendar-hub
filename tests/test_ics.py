@@ -256,7 +256,9 @@ def _event_path(collection: str, mappings: list[dict], external_id: str) -> str:
     return f"{collection}{_mapping(mappings, external_id)['ical_uid']}.ics"
 
 
-def _event_body(fake: FakeRadicale, collection: str, mappings: list[dict], external_id: str) -> str:
+def _event_body(
+    fake: FakeRadicale, collection: str, mappings: list[dict], external_id: str
+) -> str:
     return fake.events[_event_path(collection, mappings, external_id)].decode()
 
 
@@ -830,9 +832,7 @@ def test_event_limit_keeps_written_events_and_the_cursor(
         rows = _mappings(client.app.state.engine, created["id"])
         assert {row["external_id"] for row in rows} == {"one", "new-a"}
         assert _event_path(collection, rows, "new-a") in fake.events
-        assert not any(
-            row["external_id"] == "new-b" for row in rows
-        )
+        assert not any(row["external_id"] == "new-b" for row in rows)
         kept = _mapping(rows, "one")
         assert kept["last_synced_at"] == synced
         assert fake.count_events(collection) == MAX_EVENTS
@@ -846,9 +846,10 @@ def test_event_limit_keeps_written_events_and_the_cursor(
         edited = _state(client.app.state.engine, created["id"])
         assert edited["cursor"] != before["cursor"]
         rows = _mappings(client.app.state.engine, created["id"])
-        assert b"DTSTAMP:20261002T080000Z" in fake.events[
-            _event_path(collection, rows, "one")
-        ]
+        assert (
+            b"DTSTAMP:20261002T080000Z"
+            in fake.events[_event_path(collection, rows, "one")]
+        )
         assert fake.count_events(collection) == MAX_EVENTS
     finally:
         _close(client)
@@ -888,9 +889,7 @@ def test_feed_uid_with_spaces_gets_a_safe_radicale_uid(
         _close_server(server)
 
 
-def test_feed_metadata_updates_name_and_timezone(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_feed_metadata_updates_name_and_timezone(tmp_path: Path, monkeypatch) -> None:
     feed = Feed()
     server, base = _server(feed)
     client, fake = _open(tmp_path, monkeypatch)

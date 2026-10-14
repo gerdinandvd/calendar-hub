@@ -48,7 +48,9 @@ def main() -> None:
     owner = os.environ.get("HUB_USER", "").strip()
     internal = os.environ.get("HUB_INTERNAL_USER", "").strip()
     if not owner or not internal:
-        raise SystemExit("HUB_USER and HUB_INTERNAL_USER are required for Radicale rights")
+        raise SystemExit(
+            "HUB_USER and HUB_INTERNAL_USER are required for Radicale rights"
+        )
     path = Path(os.environ.get("HUB_RADICALE_RIGHTS", "/config/rights"))
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(build_rights(owner=owner, internal=internal), encoding="utf-8")

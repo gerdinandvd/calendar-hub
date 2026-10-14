@@ -91,7 +91,11 @@ def parse_feed(text: str, source_timezone: str) -> CalendarFeed:
         components = tuple(_with_stamp(item, master_stamp) for item in grouped[uid])
         objects.append(CalendarObject(uid=uid, version=version, components=components))
     name = _clean_cal_text(cal_name)
-    zone_out = cal_timezone.strip() if cal_timezone and _timezone_name_ok(cal_timezone) else None
+    zone_out = (
+        cal_timezone.strip()
+        if cal_timezone and _timezone_name_ok(cal_timezone)
+        else None
+    )
     return CalendarFeed(objects=tuple(objects), cal_name=name, cal_timezone=zone_out)
 
 
