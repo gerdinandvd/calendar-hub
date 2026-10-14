@@ -39,7 +39,6 @@ def post_source(body: SourceCreate, request: Request) -> dict | JSONResponse:
         ics_allow_http=body.ics_allow_http,
         poll_seconds=body.poll_seconds,
         ics_authorization_header=body.ics_authorization_header,
-        google_calendar_id=body.google_calendar_id,
     )
     return _json(result)
 
@@ -68,7 +67,6 @@ def patch_source(
         poll_seconds=body.poll_seconds,
         ics_authorization_header=body.ics_authorization_header,
         clear_ics_authorization=body.clear_ics_authorization == 1,
-        google_calendar_id=body.google_calendar_id,
     )
     return _json(result)
 

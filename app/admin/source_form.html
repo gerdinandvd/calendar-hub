@@ -43,20 +43,6 @@
     <input id="ics_allow_http" name="ics_allow_http" type="checkbox" value="1" {% if draft.ics_allow_http %}checked{% endif %}>
     <p>{{ t('hint.allow_http') }}</p>
     {% endif %}
-    {% if google %}
-    <label for="google_calendar_id">{{ t('field.calendar_id') }}</label>
-    <input id="google_calendar_id" name="google_calendar_id" value="{{ draft.google_calendar_id }}" {% if errors.google_calendar_id %}aria-invalid="true" aria-describedby="google_calendar_id-error"{% endif %}>
-    <p>{{ t('hint.calendar_id') }}</p>
-    {% if errors.google_calendar_id %}
-    <p id="google_calendar_id-error">{{ errors.google_calendar_id }}</p>
-    {% endif %}
-    <label for="poll_seconds">{{ t('field.poll') }}</label>
-    <input id="poll_seconds" name="poll_seconds" value="{{ draft.poll_seconds }}" {% if errors.poll_seconds %}aria-invalid="true" aria-describedby="poll_seconds-error"{% endif %}>
-    <p>{{ t('hint.poll') }}</p>
-    {% if errors.poll_seconds %}
-    <p id="poll_seconds-error">{{ errors.poll_seconds }}</p>
-    {% endif %}
-    {% endif %}
     <button type="submit">{{ submit_label }}</button>
   </form>
 </div>

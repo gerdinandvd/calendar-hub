@@ -67,7 +67,6 @@ def _list_public(engine: Engine) -> list[dict]:
                 row,
                 states.get(row.id),
                 authorization_set=_header_set(session, row.id),
-                google_connected=_google_connected(session, row.id),
             )
             for row in rows
         ]
@@ -135,17 +134,11 @@ def _status_code(row: Source, state: SyncState | None) -> str:
     return state.status
 
 
-def _google_connected(session: Session, source_id: str) -> bool:
-    secret = session.get(SourceSecret, source_id)
-    return bool(secret is not None and secret.oauth_refresh_token)
-
-
 def _public(
     row: Source,
     state: SyncState | None,
     *,
     authorization_set: bool = False,
-    google_connected: bool = False,
 ) -> dict:
     info = KINDS.get(row.kind, KindInfo(row.color, row.color, row.kind))
     status = _status_code(row, state)
@@ -170,10 +163,6 @@ def _public(
         payload["poll_seconds"] = row.poll_seconds
         payload["ics_allow_http"] = row.ics_allow_http
         payload["ics_authorization_set"] = authorization_set
-    if row.kind == "google":
-        payload["google_calendar_id"] = row.google_calendar_id
-        payload["poll_seconds"] = row.poll_seconds
-        payload["google_connected"] = google_connected
     return payload
 
 

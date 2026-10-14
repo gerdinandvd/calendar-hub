@@ -16,7 +16,6 @@ from app.main import create_app
 from app.radicale.client import RadicaleError
 from app.secrets import decrypt
 from app.sync.apply import CAPACITY_MESSAGE, MAX_EVENTS, SAVE_MESSAGE
-from app.sync.google import NOT_CONNECTED
 from app.sync.ics import (
     FETCH_MESSAGE,
     MAX_BYTES,
@@ -589,52 +588,6 @@ def test_manual_sync_answers_and_the_button(tmp_path: Path, monkeypatch) -> None
         _close_server(server)
 
 
-def test_google_start_ends_without_a_write(tmp_path: Path, monkeypatch) -> None:
-    client, fake = _open(tmp_path, monkeypatch)
-    try:
-        source_id = "google-1"
-        with Session(client.app.state.engine) as session, session.begin():
-            session.add(
-                Source(
-                    id=source_id,
-                    kind="google",
-                    name="Google",
-                    color="#188038",
-                    collection_path="/owner/google-1/",
-                    enabled=1,
-                    poll_seconds=300,
-                    timezone="Europe/Amsterdam",
-                    ics_allow_http=0,
-                    created_at="2026-10-08T12:00:00Z",
-                    updated_at="2026-10-08T12:00:00Z",
-                )
-            )
-            session.add(
-                SyncState(
-                    source_id=source_id,
-                    status="idle",
-                    events_seen=0,
-                    events_upserted=0,
-                    events_deleted=0,
-                )
-            )
-        started = _sync(client, source_id)
-        assert started.status_code == 202
-        assert wait_for(client.app.state.engine, source_id) == "error"
-        assert (
-            _state(client.app.state.engine, source_id)["last_error_message"]
-            == NOT_CONNECTED
-        )
-        assert _puts(fake) == []
-        with Session(client.app.state.engine) as session, session.begin():
-            session.get(SyncState, source_id).status = "running"
-        conflict = _sync(client, source_id)
-        assert conflict.status_code == 409
-        assert conflict.json()["error"] == "sync_running"
-    finally:
-        _close(client)
-
-
 def test_header_stays_out_of_pages_and_logs(
     tmp_path: Path, monkeypatch, caplog
 ) -> None:
@@ -764,11 +717,11 @@ def test_planner_uses_the_clock_and_a_changed_source_is_fetched_again(
         with Session(engine) as session, session.begin():
             session.add(
                 Source(
-                    id="google-due",
-                    kind="google",
-                    name="Google due",
-                    color="#188038",
-                    collection_path="/owner/google-due/",
+                    id="private-due",
+                    kind="private",
+                    name="Private due",
+                    color="#1a73e8",
+                    collection_path="/owner/private-due/",
                     enabled=1,
                     poll_seconds=300,
                     timezone="Europe/Amsterdam",
@@ -779,15 +732,17 @@ def test_planner_uses_the_clock_and_a_changed_source_is_fetched_again(
             )
             session.add(
                 SyncState(
-                    source_id="google-due",
-                    status="ok",
+                    source_id="private-due",
+                    status="na",
                     last_success_at="2020-01-01T00:00:00Z",
                     events_seen=0,
                     events_upserted=0,
                     events_deleted=0,
                 )
             )
-        assert "google-due" in due_source_ids(engine, moment + timedelta(seconds=3600))
+        assert "private-due" not in due_source_ids(
+            engine, moment + timedelta(seconds=3600)
+        )
     finally:
         _close(client)
         _close_server(server)

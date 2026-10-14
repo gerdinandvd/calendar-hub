@@ -15,15 +15,12 @@ from app.radicale.client import RadicaleClient, RadicaleError
 from app.secrets import SecretKeyError, encrypt
 from app.services.sources.prepare import (
     _created_poll,
-    _GoogleReady,
     _IcsReady,
-    _prepare_google,
     _prepare_ics,
     _validate_change,
     _validate_new,
 )
 from app.services.sources.present import (
-    _google_connected,
     _header_set,
     _host,
     _new_secret,
@@ -59,7 +56,6 @@ def create_source(
     ics_allow_http: int | None = None,
     poll_seconds: int | None = None,
     ics_authorization_header: str | None = None,
-    google_calendar_id: str | None = None,
 ) -> dict | SourceFailure:
     failure = _validate_new(
         kind,
@@ -70,7 +66,6 @@ def create_source(
         ics_allow_http=ics_allow_http,
         poll_seconds=poll_seconds,
         ics_authorization_header=ics_authorization_header,
-        google_calendar_id=google_calendar_id,
     )
     if failure is not None:
         return failure
@@ -94,14 +89,6 @@ def create_source(
                 header_cipher = encrypt(ready.header)
             except SecretKeyError:
                 return _failure(500, "sentence.secret_key")
-    google_ready: _GoogleReady | None = None
-    if kind == "google":
-        prepared = _prepare_google(
-            google_calendar_id, poll_seconds, default_calendar=True
-        )
-        if isinstance(prepared, SourceFailure):
-            return prepared
-        google_ready = prepared
     plaintext = ""
     ciphertext = None
     if kind == "webhook":
@@ -139,13 +126,11 @@ def create_source(
                 color=color,
                 collection_path=path,
                 enabled=bit,
-                poll_seconds=_created_poll(ready, google_ready),
+                poll_seconds=_created_poll(ready),
                 timezone=zone,
                 ics_url=None if ready is None else ready.url,
                 ics_allow_http=0 if ready is None else ready.allow_http,
-                google_calendar_id=None
-                if google_ready is None
-                else google_ready.calendar_id,
+                google_calendar_id=None,
                 created_at=stamp,
                 updated_at=stamp,
             )
@@ -186,7 +171,6 @@ def update_source(
     poll_seconds: int | None = None,
     ics_authorization_header: str | None = None,
     clear_ics_authorization: bool = False,
-    google_calendar_id: str | None = None,
 ) -> dict | SourceFailure:
     failure = _validate_change(name, timezone_name, enabled)
     if failure is not None:
@@ -204,7 +188,6 @@ def update_source(
         current_url = row.ics_url
         current_allow = row.ics_allow_http
         current_poll = row.poll_seconds
-        current_calendar = row.google_calendar_id
     ics_change = (
         any(
             value is not None
@@ -214,10 +197,8 @@ def update_source(
     )
     if ics_change and current_kind != "ics":
         return _failure(422, "sentence.fields_ics")
-    if poll_seconds is not None and current_kind not in {"ics", "google"}:
-        return _failure(422, "sentence.fields_google_or_ics")
-    if google_calendar_id is not None and current_kind != "google":
-        return _failure(422, "sentence.fields_google")
+    if poll_seconds is not None and current_kind != "ics":
+        return _failure(422, "sentence.fields_ics")
     ready: _IcsReady | None = None
     header_cipher = None
     header_action = "keep"
@@ -239,18 +220,6 @@ def update_source(
                 header_cipher = encrypt(ready.header)
             except SecretKeyError:
                 return _failure(500, "sentence.secret_key")
-    google_ready: _GoogleReady | None = None
-    if current_kind == "google" and (
-        google_calendar_id is not None or poll_seconds is not None
-    ):
-        prepared = _prepare_google(
-            current_calendar if google_calendar_id is None else google_calendar_id,
-            current_poll if poll_seconds is None else poll_seconds,
-            default_calendar=False,
-        )
-        if isinstance(prepared, SourceFailure):
-            return prepared
-        google_ready = prepared
     new_name = current_name if name is None else name.strip()
     new_zone = current_zone if timezone_name is None else timezone_name.strip()
     new_enabled = current_enabled if enabled is None else enabled
@@ -275,17 +244,9 @@ def update_source(
                 row.ics_url = ready.url
                 row.ics_allow_http = ready.allow_http
                 row.poll_seconds = ready.poll_seconds
-            if google_ready is not None:
-                row.google_calendar_id = google_ready.calendar_id
-                row.poll_seconds = google_ready.poll_seconds
             drop_cursor = new_zone != current_zone or (
                 ready is not None and ready.url != current_url
             )
-            if (
-                google_ready is not None
-                and google_ready.calendar_id != current_calendar
-            ):
-                drop_cursor = True
             if header_action != "keep":
                 _store_header(
                     session,
@@ -293,7 +254,7 @@ def update_source(
                     None if header_action == "clear" else header_cipher,
                 )
                 drop_cursor = True
-            if drop_cursor and row.kind in {"ics", "google"}:
+            if drop_cursor and row.kind == "ics":
                 state = session.get(SyncState, source_id)
                 if state is not None:
                     state.cursor = None
@@ -302,7 +263,6 @@ def update_source(
                 row,
                 session.get(SyncState, source_id),
                 authorization_set=_header_set(session, source_id),
-                google_connected=_google_connected(session, source_id),
             )
     except _Missing:
         if new_name != current_name:
@@ -358,7 +318,6 @@ def get_source(engine: Engine, source_id: str) -> dict | None:
             row,
             session.get(SyncState, source_id),
             authorization_set=_header_set(session, source_id),
-            google_connected=_google_connected(session, source_id),
         )
 
 
@@ -373,7 +332,6 @@ def list_sources(engine: Engine) -> list[dict]:
                 row,
                 states.get(row.id),
                 authorization_set=_header_set(session, row.id),
-                google_connected=_google_connected(session, row.id),
             )
             for row in rows
         ]

@@ -133,7 +133,6 @@ root_package = "app"
 name = "Sync importers and Radicale client are independent"
 type = "independence"
 modules = [
-    "app.sync.google",
     "app.sync.ics",
     "app.sync.webhook",
     "app.radicale.client",

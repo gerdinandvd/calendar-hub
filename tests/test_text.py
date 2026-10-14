@@ -2,18 +2,6 @@
 
 from app.i18n import EN, english, present
 from app.sync.apply import CAPACITY_MESSAGE, SAVE_MESSAGE
-from app.sync.google import (
-    FETCH_MESSAGE as GOOGLE_FETCH,
-)
-from app.sync.google import (
-    NOT_CONFIGURED,
-    NOT_CONNECTED,
-    SCOPE_MESSAGE,
-    TOKEN_MESSAGE,
-)
-from app.sync.google import (
-    READ_MESSAGE as GOOGLE_READ,
-)
 from app.sync.ics import FETCH_MESSAGE, READ_MESSAGE, SIZE_MESSAGE, TIMEOUT_MESSAGE
 from app.sync.runner import PROCESS_STOPPED
 
@@ -24,12 +12,6 @@ _CODES = (
     TIMEOUT_MESSAGE,
     SIZE_MESSAGE,
     READ_MESSAGE,
-    GOOGLE_FETCH,
-    GOOGLE_READ,
-    TOKEN_MESSAGE,
-    NOT_CONNECTED,
-    NOT_CONFIGURED,
-    SCOPE_MESSAGE,
     PROCESS_STOPPED,
     "sentence.not_found",
     "sentence.sync_unused",

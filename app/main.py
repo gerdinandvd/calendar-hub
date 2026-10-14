@@ -8,8 +8,6 @@ from fastapi import FastAPI
 from app.access import install_access
 from app.api.routers.caldav_info import router as caldav_router
 from app.api.routers.health import router as health_router
-from app.api.routers.oauth import OAuthStates
-from app.api.routers.oauth import router as oauth_router
 from app.api.routers.sources import router as sources_router
 from app.api.routers.sync import router as sync_router
 from app.api.routers.webhooks import RateLimiter
@@ -36,7 +34,6 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         Base.metadata.create_all(engine)
         ensure_sync_states(engine)
         app.state.webhook_rates = RateLimiter()
-        app.state.oauth_states = OAuthStates()
         arm()
         heartbeat = Heartbeat()
         app.state.heartbeat = heartbeat
@@ -63,7 +60,6 @@ def create_app() -> FastAPI:
     application.include_router(sources_router)
     application.include_router(sync_router)
     application.include_router(webhooks_router)
-    application.include_router(oauth_router)
     application.include_router(caldav_router)
     application.include_router(pages_router)
     return application

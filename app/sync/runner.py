@@ -12,13 +12,13 @@ from sqlalchemy.orm import Session
 from app.db.models import Source, SyncState
 from app.log import log_mutation
 from app.radicale.client import RadicaleClient
-from app.sync import google, ics, webhook
+from app.sync import ics, webhook
 from app.sync.apply import SAVE_MESSAGE, ImportResult, RunError, RunStats, Stopped
 from app.sync.webhook import Delete, Upsert
 
 SHUTDOWN_SECONDS = 30
 PROCESS_STOPPED = "sentence.process_stopped"
-_PULL_KINDS = frozenset({"google", "ics"})
+_PULL_KINDS = frozenset({"ics"})
 
 _GUARD = threading.Lock()
 _SLOTS: dict[str, threading.Lock] = {}
@@ -253,24 +253,9 @@ def _import_pull(
         if row is None or state is None:
             raise RunError("sentence.feed_fetch")
         kind = row.kind
-    if kind == "google":
-        return google.import_source(
-            engine,
-            radicale,
-            source_id,
-            stop=_STOP.is_set,
-            on_invalid_cursor=lambda: _clear_cursor(engine, source_id),
-        )
     if kind != "ics":
         raise RunError("sentence.sync_unused")
     return ics.import_source(engine, radicale, source_id, stop=_STOP.is_set)
-
-
-def _clear_cursor(engine: Engine, source_id: str) -> None:
-    with Session(engine) as session, session.begin():
-        state = session.get(SyncState, source_id)
-        if state is not None and state.status != "na":
-            state.cursor = None
 
 
 def _slot(source_id: str) -> threading.Lock:

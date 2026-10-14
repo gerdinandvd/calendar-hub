@@ -44,13 +44,6 @@ from app.ui.source_views import (
     _sources_panel,
 )
 
-_GOOGLE_NOTICE = {
-    "state": "sentence.google_incomplete",
-    "scope": "sentence.google_write",
-    "token": "sentence.google_incomplete",
-    "config": "sentence.google_config",
-}
-
 router = APIRouter()
 
 
@@ -58,7 +51,6 @@ router = APIRouter()
 def home(request: Request) -> HTMLResponse:
     engine = request.app.state.engine
     translate = _t(request)
-    notice = _GOOGLE_NOTICE.get(request.query_params.get("google", ""), "")
     return _page(
         request,
         "home.html",
@@ -66,7 +58,7 @@ def home(request: Request) -> HTMLResponse:
             "title": translate("brand"),
             "sources": list_sources(engine),
             "caldav": build_caldav_info(engine),
-            "notice": _sentence(request, notice),
+            "notice": "",
         },
     )
 
@@ -142,10 +134,7 @@ def edit_source_page(source_id: str, request: Request) -> HTMLResponse:
     found = get_source(request.app.state.engine, source_id)
     if found is None:
         raise HTTPException(status_code=404)
-    notice = _GOOGLE_NOTICE.get(request.query_params.get("google", ""), "")
-    return _page(
-        request, "source_page.html", _edit_context(request, found, notice=notice)
-    )
+    return _page(request, "source_page.html", _edit_context(request, found))
 
 
 @router.post("/sources/{source_id}")

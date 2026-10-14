@@ -23,7 +23,7 @@ https://localhost, https://127.0.0.1 {
 		}
 	}
 
-	@open path /api/webhooks /api/webhooks/* /api/oauth/google/callback
+	@open path /api/webhooks /api/webhooks/*
 	handle @open {
 		reverse_proxy hub:8000 {
 			header_up -Authorization

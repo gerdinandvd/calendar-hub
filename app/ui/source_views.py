@@ -7,7 +7,6 @@ from fastapi.responses import HTMLResponse
 
 from app.services.sources import (
     DEFAULT_POLL_SECONDS,
-    GOOGLE_POLL_SECONDS,
     SourceFailure,
     get_source,
     list_sources,
@@ -25,19 +24,11 @@ def _form_page(
     errors: dict[str, str],
     kind: str = "",
     webhook: dict | None = None,
-    google_connect: dict | None = None,
 ) -> HTMLResponse:
     translate = _t(request)
     context = _form_context(
         mode, draft, errors, kind=kind, webhook=webhook, translate=translate
     )
-    if google_connect is None:
-        context["google_connect"] = None
-    else:
-        context["google_connect"] = {
-            "href": google_connect["href"],
-            "label": _sentence(request, google_connect["label"]),
-        }
     return _page(request, "source_page.html", context)
 
 
@@ -68,7 +59,6 @@ def _form_context(
     editing = mode == "edit"
     webhook_mode = mode == "webhook"
     ics_mode = mode == "ics"
-    google_mode = mode == "google"
     if webhook_mode:
         title = translate("action.add_webhook")
         action = "/sources?kind=webhook"
@@ -77,10 +67,6 @@ def _form_context(
         title = translate("action.add_ics")
         action = "/sources?kind=ics"
         kind_code = "ics"
-    elif google_mode:
-        title = translate("action.add_google")
-        action = "/sources?kind=google"
-        kind_code = "google"
     elif editing:
         title = translate("action.edit_source")
         action = f"/sources/{draft['id']}"
@@ -98,7 +84,6 @@ def _form_context(
         "mode": mode,
         "kind": kind_code,
         "ics": ics_mode or (editing and kind == "ics"),
-        "google": google_mode or (editing and kind == "google"),
         "draft": draft,
         "errors": errors,
         "webhook_url": "" if webhook is None else webhook["url"],
@@ -183,7 +168,6 @@ def _edit_context(
         webhook=_webhook_view(found),
         translate=_t(request),
     )
-    context["google_connect"] = _google_connect(found)
     context["heading"] = found["name"]
     context["title"] = found["name"]
     context["workplace"] = True
@@ -251,22 +235,14 @@ def _draft(
         poll = posted.get("poll_seconds", "")
         allow = 1 if posted.get("ics_allow_http") == "1" else 0
         url = posted.get("ics_url", "")
-        calendar = posted.get("google_calendar_id", "")
     elif stored_kind == "ics":
         poll = stored.get("poll_seconds", DEFAULT_POLL_SECONDS)
         allow = stored.get("ics_allow_http", 0)
         url = stored.get("ics_url") or ""
-        calendar = ""
-    elif stored_kind == "google":
-        poll = stored.get("poll_seconds", GOOGLE_POLL_SECONDS)
-        allow = 0
-        url = ""
-        calendar = stored.get("google_calendar_id") or "primary"
     else:
         poll = DEFAULT_POLL_SECONDS
         allow = 0
         url = ""
-        calendar = "primary" if kind == "google" else ""
     header_set = (
         bool(stored.get("ics_authorization_set"))
         and posted.get("clear_ics_authorization") != "1"
@@ -279,7 +255,6 @@ def _draft(
         "poll_seconds": poll,
         "ics_allow_http": allow,
         "ics_authorization_set": header_set,
-        "google_calendar_id": calendar,
     }
 
 
@@ -292,7 +267,6 @@ def _blank_errors() -> dict[str, str]:
         "poll_seconds": "",
         "ics_authorization_header": "",
         "ics_allow_http": "",
-        "google_calendar_id": "",
     }
 
 
@@ -307,9 +281,6 @@ def _errors(failure: SourceFailure, request: Request) -> dict[str, str]:
             request, failure.fields.get("ics_authorization_header", "")
         ),
         "ics_allow_http": _sentence(request, failure.fields.get("ics_allow_http", "")),
-        "google_calendar_id": _sentence(
-            request, failure.fields.get("google_calendar_id", "")
-        ),
     }
 
 
@@ -318,8 +289,6 @@ def _create_mode(kind: str) -> str:
         return "webhook"
     if kind == "ics":
         return "ics"
-    if kind == "google":
-        return "google"
     return "create"
 
 
@@ -328,8 +297,6 @@ def _chosen_kind(kind: str) -> str:
         return "webhook"
     if kind == "ics":
         return "ics"
-    if kind == "google":
-        return "google"
     return "private"
 
 
@@ -338,36 +305,7 @@ def _kind_values(
 ) -> tuple[dict, SourceFailure | None]:
     if kind == "ics":
         return _ics_values(form, create=create)
-    if kind == "google":
-        return _google_values(form, create=create)
     return {}, None
-
-
-def _google_values(
-    form: dict[str, str], *, create: bool
-) -> tuple[dict, SourceFailure | None]:
-    raw_poll = form.get("poll_seconds", "")
-    if create and raw_poll.strip() == "":
-        poll: int | SourceFailure = GOOGLE_POLL_SECONDS
-    else:
-        poll = poll_from_form(raw_poll)
-    if isinstance(poll, SourceFailure):
-        return {}, poll
-    return {
-        "google_calendar_id": form.get("google_calendar_id", ""),
-        "poll_seconds": poll,
-    }, None
-
-
-def _google_connect(found: dict) -> dict | None:
-    if found.get("kind") != "google":
-        return None
-    return {
-        "href": f"/api/oauth/google/start?source_id={found['id']}",
-        "label": "action.reconnect_google"
-        if found.get("google_connected")
-        else "action.connect_google",
-    }
 
 
 def _ics_values(

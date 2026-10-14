@@ -8,7 +8,6 @@
   {% endif %}
   <p><a href="/sources/new">{{ t('action.add_source') }}</a></p>
   <p><a href="/sources/new?kind=ics">{{ t('action.add_ics') }}</a></p>
-  <p><a href="/sources/new?kind=google">{{ t('action.add_google') }}</a></p>
   <p><a href="/sources/new?kind=webhook">{{ t('action.add_webhook') }}</a></p>
   {% if sources %}
   <table>
@@ -43,7 +42,7 @@
         </td>
         <td><a href="/sources/{{ source.id }}">{{ t('action.edit') }}</a></td>
         <td>
-          {% if source.kind == "google" or source.kind == "ics" %}
+          {% if source.kind == "ics" %}
           <form method="post" action="/sources/{{ source.id }}/sync?view=sources" hx-post="/sources/{{ source.id }}/sync?view=sources" hx-target="#sources-panel" hx-swap="outerHTML">
             <button type="submit">{{ t('action.sync') }}</button>
           </form>

@@ -14,7 +14,6 @@ class SourceCreate(BaseModel):
     ics_allow_http: int | None = None
     poll_seconds: int | None = None
     ics_authorization_header: str | None = None
-    google_calendar_id: str | None = None
 
 
 class SourcePatch(BaseModel):
@@ -28,4 +27,3 @@ class SourcePatch(BaseModel):
     poll_seconds: int | None = None
     ics_authorization_header: str | None = None
     clear_ics_authorization: int | None = None
-    google_calendar_id: str | None = None

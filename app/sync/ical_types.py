@@ -1,4 +1,4 @@
-"""Shared calendar domain types for VEVENT build/parse and Google projection."""
+"""Shared calendar domain types for VEVENT build and parse."""
 
 from dataclasses import dataclass
 from datetime import date, datetime

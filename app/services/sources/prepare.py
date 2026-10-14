@@ -8,7 +8,6 @@ from app.services.sources.types import (
     CREATABLE_KINDS,
     DEFAULT_POLL_SECONDS,
     DEFAULT_TIMEZONE,
-    GOOGLE_POLL_SECONDS,
     SourceFailure,
     _failure,
     _field,
@@ -21,12 +20,6 @@ class _IcsReady:
     allow_http: int
     poll_seconds: int
     header: str | None
-
-
-@dataclass(frozen=True)
-class _GoogleReady:
-    calendar_id: str
-    poll_seconds: int
 
 
 def poll_from_form(raw: str) -> int | SourceFailure:
@@ -46,19 +39,14 @@ def _validate_new(
     ics_allow_http: int | None = None,
     poll_seconds: int | None = None,
     ics_authorization_header: str | None = None,
-    google_calendar_id: str | None = None,
 ) -> SourceFailure | None:
     if kind not in CREATABLE_KINDS:
         return _failure(422, "sentence.creatable")
     if kind != "ics" and any(
         value is not None
-        for value in (ics_url, ics_allow_http, ics_authorization_header)
+        for value in (ics_url, ics_allow_http, ics_authorization_header, poll_seconds)
     ):
         return _failure(422, "sentence.fields_ics")
-    if kind not in {"ics", "google"} and poll_seconds is not None:
-        return _failure(422, "sentence.fields_google_or_ics")
-    if kind != "google" and google_calendar_id is not None:
-        return _failure(422, "sentence.fields_google")
     fields: dict[str, str] = {}
     if not name.strip():
         fields["name"] = "sentence.enter_name"
@@ -164,48 +152,7 @@ def _url_error(url: str, allow_http: bool) -> str | None:
     return "sentence.https"
 
 
-def _created_poll(
-    ready: _IcsReady | None, google_ready: _GoogleReady | None
-) -> int | None:
+def _created_poll(ready: _IcsReady | None) -> int | None:
     if ready is not None:
         return ready.poll_seconds
-    if google_ready is not None:
-        return google_ready.poll_seconds
-    return None
-
-
-def _prepare_google(
-    calendar_id: str | None,
-    poll_seconds: int | None,
-    *,
-    default_calendar: bool,
-) -> _GoogleReady | SourceFailure:
-    fields: dict[str, str] = {}
-    if calendar_id is None or (default_calendar and not calendar_id.strip()):
-        calendar = "primary"
-    else:
-        calendar = calendar_id.strip()
-        error = _calendar_error(calendar)
-        if error:
-            fields["google_calendar_id"] = error
-    poll: int | SourceFailure
-    if poll_seconds is None:
-        poll = GOOGLE_POLL_SECONDS
-    else:
-        poll = _poll_value(poll_seconds)
-        if isinstance(poll, SourceFailure):
-            fields["poll_seconds"] = poll.detail
-    if fields:
-        return _failure(422, " ".join(fields.values()), fields)
-    return _GoogleReady(
-        calendar_id=calendar if "google_calendar_id" not in fields else "primary",
-        poll_seconds=poll if isinstance(poll, int) else GOOGLE_POLL_SECONDS,
-    )
-
-
-def _calendar_error(value: str) -> str | None:
-    if not value or any(char in value for char in "\r\n\t "):
-        return "sentence.calendar_id"
-    if len(value) > 1024:
-        return "sentence.calendar_id"
     return None

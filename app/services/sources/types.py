@@ -5,8 +5,7 @@ from dataclasses import dataclass, field
 MAX_SOURCES = 20
 DEFAULT_TIMEZONE = "Europe/Amsterdam"
 DEFAULT_POLL_SECONDS = 900
-GOOGLE_POLL_SECONDS = 300
-CREATABLE_KINDS = frozenset({"private", "webhook", "ics", "google"})
+CREATABLE_KINDS = frozenset({"private", "webhook", "ics"})
 STATUS_LABELS = {
     "idle": "not yet started",
     "running": "busy",
@@ -25,7 +24,6 @@ class KindInfo:
 
 KINDS: dict[str, KindInfo] = {
     "private": KindInfo("#1a73e8", "blue", "Private"),
-    "google": KindInfo("#188038", "green", "Google"),
     "webhook": KindInfo("#9334e6", "purple", "Webhook"),
     "ics": KindInfo("#f9ab00", "yellow", "External ICS"),
 }
@@ -52,13 +50,6 @@ class WebhookApplyError(Exception):
 class WebhookSecretError(Exception):
     def __init__(self, message: str) -> None:
         self.message = message
-
-
-class GoogleConnectError(Exception):
-    """OAuth connect failed. reason is config, scope, or token."""
-
-    def __init__(self, reason: str) -> None:
-        self.reason = reason
 
 
 class ConfigError(Exception):

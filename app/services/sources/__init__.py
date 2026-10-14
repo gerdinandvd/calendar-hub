@@ -9,13 +9,11 @@ from app.services.sources.crud import (
 )
 from app.services.sources.types import (
     DEFAULT_POLL_SECONDS,
-    GOOGLE_POLL_SECONDS,
     SourceFailure,
 )
 
 __all__ = [
     "DEFAULT_POLL_SECONDS",
-    "GOOGLE_POLL_SECONDS",
     "SourceFailure",
     "create_source",
     "delete_source",

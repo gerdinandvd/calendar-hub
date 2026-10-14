@@ -28,7 +28,7 @@
     <button type="submit">{{ t('action.turn_on') }}</button>
     {% endif %}
   </form>
-  {% if source.kind == "google" or source.kind == "ics" %}
+  {% if source.kind == "ics" %}
   <form method="post" action="/sources/{{ source.id }}/sync?view=source" hx-post="/sources/{{ source.id }}/sync?view=source" hx-target="#source-main" hx-swap="outerHTML">
     <button type="submit">{{ t('action.sync') }}</button>
   </form>
@@ -48,10 +48,6 @@
   </dialog>
   {% endif %}
   {% include "source_form.html" %}
-  {% if google_connect %}
-  <p><a href="{{ google_connect.href }}">{{ t(google_connect.label) }}</a></p>
-  <p>{{ t('sentence.read_only') }}</p>
-  {% endif %}
   {% if webhook_url %}
   {% include "webhook_panel.html" %}
   {% endif %}

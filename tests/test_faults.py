@@ -8,13 +8,11 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-import test_google as google_tests
 import test_ics as ics_tests
 import test_webhook as webhook_tests
 from app.i18n import english
 from app.radicale.client import RadicaleClient
 from app.sync.apply import SAVE_MESSAGE
-from app.sync.google import FETCH_MESSAGE, READ_MESSAGE, TIMEOUT_SECONDS, _timeout
 from app.sync.ics import TIMEOUT_MESSAGE
 from app.sync.runner import PROCESS_STOPPED, stop_runs, wait_for
 
@@ -143,16 +141,6 @@ def _assert_visible(client, source_id: str, name: str, message: str, caplog) -> 
     assert "run_id=" in caplog.text
 
 
-def test_google_timeout_stays_thirty_seconds(monkeypatch) -> None:
-    monkeypatch.delenv("HUB_GOOGLE_TIMEOUT", raising=False)
-    assert TIMEOUT_SECONDS == 30
-    assert _timeout() == 30
-    monkeypatch.setenv("HUB_GOOGLE_TIMEOUT", "0")
-    assert _timeout() == 30
-    monkeypatch.setenv("HUB_GOOGLE_TIMEOUT", "0.2")
-    assert _timeout() == 0.2
-
-
 def test_ics_timeout_does_not_fail_another_source(tmp_path: Path, monkeypatch) -> None:
     feed = ics_tests.Feed()
     server, base = ics_tests._server(feed)
@@ -192,86 +180,6 @@ def test_ics_timeout_does_not_fail_another_source(tmp_path: Path, monkeypatch) -
             feed.hold.set()
         ics_tests._close(client)
         ics_tests._close_server(server)
-
-
-def test_google_timeout_keeps_the_previous_event(tmp_path: Path, monkeypatch) -> None:
-    google = google_tests.FakeGoogle()
-    server, base = google_tests._server(google)
-    client, fake = google_tests._open(tmp_path, monkeypatch, base)
-    try:
-        work = google_tests._create(client, "Work")
-        google_tests._connect(client, work["id"])
-        google.push(
-            *google_tests._page([google_tests._item("keep", "etag-keep")], "token-1")
-        )
-        assert google_tests._sync(client, work["id"]).status_code == 202
-        assert wait_for(client.app.state.engine, work["id"]) == "ok"
-        before = google_tests._state(client.app.state.engine, work["id"])
-        synced = google_tests._mappings(client.app.state.engine, work["id"])[0][
-            "last_synced_at"
-        ]
-        other = google_tests._create(client, "Other")
-        google_tests._connect(client, other["id"])
-        google.push(
-            *google_tests._page([google_tests._item("extra", "etag-extra")], "token-2")
-        )
-        google.hold = threading.Event()
-        monkeypatch.setenv("HUB_GOOGLE_TIMEOUT", "0.2")
-        assert google_tests._sync(client, work["id"]).status_code == 202
-        assert wait_for(client.app.state.engine, work["id"], timeout=3) == "error"
-        failed = google_tests._state(client.app.state.engine, work["id"])
-        assert failed["last_error_message"] == FETCH_MESSAGE
-        assert failed["last_success_at"] == before["last_success_at"]
-        assert failed["cursor"] == before["cursor"]
-        rows = google_tests._mappings(client.app.state.engine, work["id"])
-        assert [row["external_id"] for row in rows] == ["keep"]
-        assert rows[0]["last_synced_at"] == synced
-        untouched = google_tests._state(client.app.state.engine, other["id"])
-        assert untouched["status"] == "idle"
-        assert untouched["last_success_at"] is None
-        assert len(fake.events) == 1
-    finally:
-        if google.hold is not None:
-            google.hold.set()
-        google_tests._close(client)
-        google_tests._close_server(server)
-
-
-def test_google_parse_error_keeps_the_cursor(tmp_path: Path, monkeypatch) -> None:
-    google = google_tests.FakeGoogle()
-    server, base = google_tests._server(google)
-    client, fake = google_tests._open(tmp_path, monkeypatch, base)
-    try:
-        work = google_tests._create(client, "Work")
-        google_tests._connect(client, work["id"])
-        google.push(
-            *google_tests._page([google_tests._item("keep", "etag-keep")], "token-1")
-        )
-        assert google_tests._sync(client, work["id"]).status_code == 202
-        assert wait_for(client.app.state.engine, work["id"]) == "ok"
-        before = google_tests._state(client.app.state.engine, work["id"])
-        synced = google_tests._mappings(client.app.state.engine, work["id"])[0][
-            "last_synced_at"
-        ]
-        other = google_tests._create(client, "Other")
-        google.push(200, {"items": ["bad"], "nextSyncToken": "broken"})
-        assert google_tests._sync(client, work["id"]).status_code == 202
-        assert wait_for(client.app.state.engine, work["id"]) == "error"
-        failed = google_tests._state(client.app.state.engine, work["id"])
-        assert failed["last_error_message"] == READ_MESSAGE
-        assert failed["cursor"] == before["cursor"]
-        assert failed["last_success_at"] == before["last_success_at"]
-        rows = google_tests._mappings(client.app.state.engine, work["id"])
-        assert [row["external_id"] for row in rows] == ["keep"]
-        assert rows[0]["last_synced_at"] == synced
-        assert len(fake.events) == 1
-        assert (
-            google_tests._state(client.app.state.engine, other["id"])["status"]
-            == "idle"
-        )
-    finally:
-        google_tests._close(client)
-        google_tests._close_server(server)
 
 
 def test_stopped_radicale_on_ics_is_a_sentence_without_a_status(
@@ -318,48 +226,6 @@ def test_stopped_radicale_on_ics_is_a_sentence_without_a_status(
         ics_tests._close_server(server)
 
 
-def test_stopped_radicale_on_google_keeps_the_event(
-    tmp_path: Path, monkeypatch, caplog
-) -> None:
-    google = google_tests.FakeGoogle()
-    server, base = google_tests._server(google)
-    client, fake = google_tests._open(tmp_path, monkeypatch, base)
-    try:
-        work = google_tests._create(client, "Work")
-        google_tests._connect(client, work["id"])
-        google.push(
-            *google_tests._page([google_tests._item("keep", "etag-keep")], "token-1")
-        )
-        assert google_tests._sync(client, work["id"]).status_code == 202
-        assert wait_for(client.app.state.engine, work["id"]) == "ok"
-        before = google_tests._state(client.app.state.engine, work["id"])
-        synced = google_tests._mappings(client.app.state.engine, work["id"])[0][
-            "last_synced_at"
-        ]
-        saved = dict(fake.events)
-        google.push(
-            *google_tests._page([google_tests._item("extra", "etag-extra")], "token-2")
-        )
-        _swap(client, _closed_client())
-        with caplog.at_level(logging.INFO, logger="app"):
-            assert google_tests._sync(client, work["id"]).status_code == 202
-            assert wait_for(client.app.state.engine, work["id"]) == "error"
-        failed = google_tests._state(client.app.state.engine, work["id"])
-        assert failed["last_error_message"] == SAVE_MESSAGE
-        assert failed["cursor"] == before["cursor"]
-        assert failed["last_success_at"] == before["last_success_at"]
-        rows = google_tests._mappings(client.app.state.engine, work["id"])
-        assert [row["external_id"] for row in rows] == ["keep"]
-        assert rows[0]["last_synced_at"] == synced
-        assert fake.events == saved
-        assert "status=none" in caplog.text
-        assert re.search(r"status=\d{3}", caplog.text) is None
-        assert "Traceback" not in caplog.text
-    finally:
-        google_tests._close(client)
-        google_tests._close_server(server)
-
-
 def test_stopped_radicale_on_webhook_keeps_the_event(
     tmp_path: Path, monkeypatch, caplog
 ) -> None:
@@ -400,63 +266,6 @@ def test_stopped_radicale_on_webhook_keeps_the_event(
         assert re.search(r"status=\d{3}", caplog.text) is None
     finally:
         webhook_tests._close(client)
-
-
-def test_google_process_stop_keeps_the_event(tmp_path: Path, monkeypatch) -> None:
-    google = google_tests.FakeGoogle()
-    server, base = google_tests._server(google)
-    client, fake = google_tests._open(tmp_path, monkeypatch, base)
-    try:
-        work = google_tests._create(client, "Work")
-        google_tests._connect(client, work["id"])
-        google.push(
-            *google_tests._page([google_tests._item("keep", "etag-keep")], "token-1")
-        )
-        assert google_tests._sync(client, work["id"]).status_code == 202
-        assert wait_for(client.app.state.engine, work["id"]) == "ok"
-        before = google_tests._state(client.app.state.engine, work["id"])
-        synced = google_tests._mappings(client.app.state.engine, work["id"])[0][
-            "last_synced_at"
-        ]
-        google.hold = threading.Event()
-        google.push(
-            *google_tests._page(
-                [
-                    google_tests._item("keep", "etag-keep"),
-                    google_tests._item("extra", "etag-extra"),
-                ],
-                "token-2",
-            )
-        )
-        seen = len(google.requests)
-        assert google_tests._sync(client, work["id"]).status_code == 202
-        deadline = time.monotonic() + 2
-        while time.monotonic() < deadline:
-            if any(
-                item["path"].startswith("/calendars/")
-                for item in google.requests[seen:]
-            ):
-                break
-            time.sleep(0.01)
-        stop_runs(client.app.state.engine, timeout=0.05)
-        stopped = google_tests._state(client.app.state.engine, work["id"])
-        assert stopped["status"] == "error"
-        assert stopped["last_error_message"] == PROCESS_STOPPED
-        google.hold.set()
-        assert wait_for(client.app.state.engine, work["id"]) == "error"
-        finished = google_tests._state(client.app.state.engine, work["id"])
-        assert finished["last_error_message"] == PROCESS_STOPPED
-        assert finished["cursor"] == before["cursor"]
-        assert finished["last_success_at"] == before["last_success_at"]
-        rows = google_tests._mappings(client.app.state.engine, work["id"])
-        assert [row["external_id"] for row in rows] == ["keep"]
-        assert rows[0]["last_synced_at"] == synced
-        assert len(fake.events) == 1
-    finally:
-        if google.hold is not None:
-            google.hold.set()
-        google_tests._close(client)
-        google_tests._close_server(server)
 
 
 def test_webhook_process_stop_keeps_the_event(tmp_path: Path, monkeypatch) -> None:
@@ -557,62 +366,6 @@ def test_failed_etag_retry_on_ics_keeps_the_first_write(
             _close_server(caldav)
         ics_tests._close(client)
         ics_tests._close_server(server)
-
-
-def test_failed_etag_retry_on_google_keeps_the_first_write(
-    tmp_path: Path, monkeypatch, caplog
-) -> None:
-    google = google_tests.FakeGoogle()
-    server, base = google_tests._server(google)
-    client, fake = google_tests._open(tmp_path, monkeypatch, base)
-    caldav = None
-    try:
-        work = google_tests._create(client, "Work")
-        google_tests._connect(client, work["id"])
-        google.push(
-            *google_tests._page([google_tests._item("keep", "etag-keep")], "token-1")
-        )
-        assert google_tests._sync(client, work["id"]).status_code == 202
-        assert wait_for(client.app.state.engine, work["id"]) == "ok"
-        before = google_tests._state(client.app.state.engine, work["id"])
-        synced = google_tests._mappings(client.app.state.engine, work["id"])[0][
-            "last_synced_at"
-        ]
-        store = _Store(fake.events, accept=1)
-        caldav, radicale = _serve(store)
-        _swap(client, radicale)
-        google.push(
-            *google_tests._page(
-                [
-                    google_tests._item("added", "etag-added"),
-                    google_tests._item("blocked", "etag-blocked"),
-                ],
-                "token-2",
-            )
-        )
-        with caplog.at_level(logging.INFO, logger="app"):
-            assert google_tests._sync(client, work["id"]).status_code == 202
-            assert wait_for(client.app.state.engine, work["id"]) == "error"
-        failed = google_tests._state(client.app.state.engine, work["id"])
-        assert failed["last_error_message"] == SAVE_MESSAGE
-        assert failed["cursor"] == before["cursor"]
-        assert failed["last_success_at"] == before["last_success_at"]
-        rows = {
-            row["external_id"]: row
-            for row in google_tests._mappings(client.app.state.engine, work["id"])
-        }
-        assert rows["keep"]["last_synced_at"] == synced
-        assert "added" in rows
-        assert "blocked" not in rows
-        assert store.deletes == []
-        assert store.puts == 1
-        assert "radicale_error method=PUT status=500" in caplog.text
-        assert "Traceback" not in caplog.text
-    finally:
-        if caldav is not None:
-            _close_server(caldav)
-        google_tests._close(client)
-        google_tests._close_server(server)
 
 
 def test_failed_etag_retry_on_webhook_keeps_the_event(

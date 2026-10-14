@@ -1,4 +1,4 @@
-"""Polls Google and ICS sources."""
+"""Polls ICS sources."""
 
 import asyncio
 from datetime import UTC, datetime
@@ -75,7 +75,7 @@ def due_source_ids(engine: Engine, now: datetime) -> list[str]:
         ).all()
         for row in rows:
             if (
-                row.kind not in {"google", "ics"}
+                row.kind != "ics"
                 or row.enabled != 1
                 or not row.poll_seconds
             ):

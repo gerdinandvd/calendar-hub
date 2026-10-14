@@ -34,7 +34,7 @@
         <td>{% if source.events_upserted != None %}{{ source.events_upserted }}{% endif %}</td>
         <td>{% if source.events_deleted != None %}{{ source.events_deleted }}{% endif %}</td>
         <td>
-          {% if source.kind == "google" or source.kind == "ics" %}
+          {% if source.kind == "ics" %}
           <form method="post" action="/sources/{{ source.id }}/sync?view=sync" hx-post="/sources/{{ source.id }}/sync?view=sync" hx-target="#sync-panel" hx-swap="outerHTML">
             <button type="submit">{{ t('action.sync') }}</button>
           </form>

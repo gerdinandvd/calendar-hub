@@ -234,8 +234,6 @@ def test_public_access_requires_owner_and_blocks_internal_account(
 
     status, _, _ = _https("GET", "/api/webhooks/example")
     assert status != 401
-    status, _, _ = _https("GET", "/api/oauth/google/callback")
-    assert status != 401
 
     users = _compose(ROOT, "exec", "-T", "radicale", "cat", "/data/users")
     assert users.returncode == 0, users.stderr
