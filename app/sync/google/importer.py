@@ -40,10 +40,11 @@ from app.sync.google.oauth import (
     store_tokens,
 )
 from app.sync.ical import (
+    CalendarEvent,
     CalendarObject,
     CalendarParseError,
+    Mark,
     build_object,
-    merge_partial,
     parse_vcalendar,
 )
 
@@ -280,7 +281,7 @@ def _merged_change(
     if len(parsed) != 1:
         raise RunError(SAVE_MESSAGE)
     try:
-        return merge_partial(
+        return _merge_partial(
             parsed[0],
             change.master,
             change.exceptions,
@@ -290,3 +291,55 @@ def _merged_change(
         )
     except CalendarParseError:
         raise RunError(SAVE_MESSAGE) from None
+
+
+def _merge_partial(
+    existing: CalendarObject,
+    master: CalendarEvent | None,
+    exceptions: tuple[CalendarEvent, ...],
+    exdates: tuple[Mark, ...],
+    *,
+    uid: str,
+    version: str,
+) -> CalendarObject:
+    """Fold an incremental Google change into the event already stored."""
+
+    masters = [item for item in existing.components if item.recurrence_id is None]
+    if master is None and len(masters) != 1:
+        raise CalendarParseError()
+    base = replace(master if master is not None else masters[0], uid=uid)
+    extra = [mark for mark in exdates if not _mark_in(mark, base.exdates)]
+    if extra:
+        base = replace(base, exdates=base.exdates + tuple(extra))
+    kept: list[CalendarEvent] = []
+    for item in existing.components:
+        if item.recurrence_id is None or _mark_in(item.recurrence_id, base.exdates):
+            continue
+        kept.append(replace(item, uid=uid))
+    for incoming in exceptions:
+        recurrence_id = incoming.recurrence_id
+        if recurrence_id is None:
+            raise CalendarParseError()
+        event = replace(incoming, uid=uid)
+        if _mark_in(recurrence_id, base.exdates):
+            continue
+        index = next(
+            (
+                position
+                for position, item in enumerate(kept)
+                if item.recurrence_id is not None
+                and _mark_in(recurrence_id, (item.recurrence_id,))
+            ),
+            None,
+        )
+        if index is None:
+            kept.append(event)
+        else:
+            kept[index] = event
+    return CalendarObject(uid=uid, version=version, components=(base, *kept))
+
+
+def _mark_in(mark: Mark, marks: tuple[Mark, ...]) -> bool:
+    return any(
+        mark.value == item.value and mark.all_day == item.all_day for item in marks
+    )

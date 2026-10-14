@@ -18,13 +18,8 @@ from app.sync.google.oauth import (
     json_request,
     refresh_if_needed,
 )
-from app.sync.ical import (
-    CalendarEvent,
-    CalendarParseError,
-    Mark,
-    google_point,
-    recurrence_parts,
-)
+from app.sync.google.projection import google_point, recurrence_parts
+from app.sync.ical import CalendarEvent, CalendarParseError, Mark
 
 PAGE_SIZE = 250
 MAX_PAGES = 400
