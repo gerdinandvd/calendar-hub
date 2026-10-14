@@ -32,10 +32,7 @@ def main() -> None:
     path = Path("/data/users")
     path.parent.mkdir(parents=True, exist_ok=True)
     content = (
-        line(owner, owner_password)
-        + "\n"
-        + line(internal, internal_password)
-        + "\n"
+        line(owner, owner_password) + "\n" + line(internal, internal_password) + "\n"
     )
     path.write_text(content, encoding="ascii")
     os.chmod(path, 0o600)

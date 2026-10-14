@@ -40,13 +40,13 @@ _HAS_UID_CACHED = '''    def has_uid(self, uid: str) -> bool:
         return uid in known
 '''
 
-_UPLOAD_RETURN = '''        uploaded_item = self._get(href, verify_href=False)
+_UPLOAD_RETURN = """        uploaded_item = self._get(href, verify_href=False)
         if uploaded_item is None:
             raise RuntimeError("Storage modified externally")
         return uploaded_item, old_item
-'''
+"""
 
-_UPLOAD_RETURN_CACHED = '''        uploaded_item = self._get(href, verify_href=False)
+_UPLOAD_RETURN_CACHED = """        uploaded_item = self._get(href, verify_href=False)
         if uploaded_item is None:
             raise RuntimeError("Storage modified externally")
         remembered = getattr(self._storage, "_calendar_hub_uids", None)
@@ -55,25 +55,25 @@ _UPLOAD_RETURN_CACHED = '''        uploaded_item = self._get(href, verify_href=F
             if known is not None:
                 known.add(uploaded_item.uid)
         return uploaded_item, old_item
-'''
+"""
 
-_DELETE_ITEM = '''            if not os.path.isfile(path):
+_DELETE_ITEM = """            if not os.path.isfile(path):
                 raise storage.ComponentNotFoundError(href)
             os.remove(path)
-'''
+"""
 
-_DELETE_ITEM_CACHED = '''            if not os.path.isfile(path):
+_DELETE_ITEM_CACHED = """            if not os.path.isfile(path):
                 raise storage.ComponentNotFoundError(href)
             deleted = self._get(href, verify_href=False)
             os.remove(path)
-'''
+"""
 
-_DELETE_CACHE = '''            if os.path.isfile(cache_file):
+_DELETE_CACHE = """            if os.path.isfile(cache_file):
                 os.remove(cache_file)
                 self._storage._sync_directory(cache_folder)
-'''
+"""
 
-_DELETE_CACHE_CACHED = '''            if os.path.isfile(cache_file):
+_DELETE_CACHE_CACHED = """            if os.path.isfile(cache_file):
                 os.remove(cache_file)
                 self._storage._sync_directory(cache_folder)
             remembered = getattr(self._storage, "_calendar_hub_uids", None)
@@ -81,41 +81,41 @@ _DELETE_CACHE_CACHED = '''            if os.path.isfile(cache_file):
                 known = remembered.get(self.path)
                 if known is not None:
                     known.discard(deleted.uid)
-'''
+"""
 
-_DELETE_COLLECTION = '''        if href is None:
+_DELETE_COLLECTION = """        if href is None:
             # Delete the collection
-'''
+"""
 
-_DELETE_COLLECTION_CACHED = '''        if href is None:
+_DELETE_COLLECTION_CACHED = """        if href is None:
             remembered = getattr(self._storage, "_calendar_hub_uids", None)
             if remembered is not None:
                 remembered.pop(self.path, None)
             # Delete the collection
-'''
+"""
 
-_MOVE_END = '''        if item.collection._filesystem_path != to_collection._filesystem_path:
+_MOVE_END = """        if item.collection._filesystem_path != to_collection._filesystem_path:
             item.collection._clean_history()
-'''
+"""
 
-_MOVE_END_CACHED = '''        if item.collection._filesystem_path != to_collection._filesystem_path:
+_MOVE_END_CACHED = """        if item.collection._filesystem_path != to_collection._filesystem_path:
             item.collection._clean_history()
         remembered = getattr(self, "_calendar_hub_uids", None)
         if remembered is not None:
             remembered.pop(getattr(item.collection, "path", None), None)
             remembered.pop(getattr(to_collection, "path", None), None)
-'''
+"""
 
-_BULK = '''    def _upload_all_nonatomic(self, items: Iterable[radicale_item.Item],
+_BULK = """    def _upload_all_nonatomic(self, items: Iterable[radicale_item.Item],
                               suffix: str = "") -> None:
-'''
+"""
 
-_BULK_CACHED = '''    def _upload_all_nonatomic(self, items: Iterable[radicale_item.Item],
+_BULK_CACHED = """    def _upload_all_nonatomic(self, items: Iterable[radicale_item.Item],
                               suffix: str = "") -> None:
         remembered = getattr(self._storage, "_calendar_hub_uids", None)
         if remembered is not None:
             remembered.pop(self.path, None)
-'''
+"""
 
 
 def _replace(path: Path, old: str, new: str, missing: str) -> None:
