@@ -10,12 +10,14 @@ from fastapi.responses import JSONResponse
 
 from app.access import json_error
 from app.i18n import english
-from app.services.sources import (
+from app.services.sources import get_source
+from app.services.sources.types import (
     WebhookApplyError,
     WebhookPayloadError,
     WebhookSecretError,
+)
+from app.services.sources.webhook import (
     apply_webhook_payload,
-    get_source,
     webhook_secret_matches,
 )
 

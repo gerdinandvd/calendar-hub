@@ -14,7 +14,7 @@ from app.i18n import english
 from app.main import create_app
 from app.radicale.client import RadicaleError
 from app.secrets import decrypt
-from app.services.sources import ensure_sync_states
+from app.services.sources.sync_ops import ensure_sync_states
 from app.sync.apply import CAPACITY_MESSAGE, MAX_EVENTS, SAVE_MESSAGE, RunStats
 from app.sync.runner import SlotBusy, run_source
 from app.sync.webhook import parse

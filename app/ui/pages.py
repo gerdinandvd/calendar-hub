@@ -13,18 +13,16 @@ from app.services.sources import (
     DEFAULT_POLL_SECONDS,
     GOOGLE_POLL_SECONDS,
     SourceFailure,
-    build_caldav_info,
     create_source,
     delete_source,
-    endpoint_url,
     get_source,
     list_sources,
-    list_sync_status,
-    poll_from_form,
-    rotate_webhook_secret,
-    start_sync,
     update_source,
 )
+from app.services.sources.prepare import poll_from_form
+from app.services.sources.present import build_caldav_info, endpoint_url
+from app.services.sources.sync_ops import list_sync_status, start_sync
+from app.services.sources.webhook import rotate_webhook_secret
 
 _GOOGLE_NOTICE = {
     "state": "sentence.google_incomplete",

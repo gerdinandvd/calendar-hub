@@ -19,7 +19,7 @@ from app.db.session import make_engine
 from app.health import Heartbeat
 from app.log import configure_logging
 from app.radicale.client import RadicaleClient
-from app.services.sources import ensure_sync_states
+from app.services.sources.sync_ops import ensure_sync_states
 from app.sync.runner import arm
 from app.sync.scheduler import Scheduler
 from app.ui.pages import router as pages_router

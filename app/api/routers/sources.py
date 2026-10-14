@@ -11,12 +11,12 @@ from app.services.sources import (
     create_source,
     delete_source,
     get_source,
-    list_calendars,
     list_sources,
-    rotate_webhook_secret,
-    start_sync,
     update_source,
 )
+from app.services.sources.present import list_calendars
+from app.services.sources.sync_ops import start_sync
+from app.services.sources.webhook import rotate_webhook_secret
 
 router = APIRouter()
 

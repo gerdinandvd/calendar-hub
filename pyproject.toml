@@ -102,7 +102,7 @@ enable = [
 
 [tool.pylint.format]
 # Floor for current app/ (largest module ~999 physical lines); tighten later.
-max-module-lines = 1000
+max-module-lines = 800
 
 [tool.pylint.design]
 # Calibrated to current app/; tighten only, do not raise without review.

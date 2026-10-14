@@ -8,12 +8,12 @@ from fastapi import APIRouter, Request
 from fastapi.responses import RedirectResponse, Response
 
 from app.access import json_error
-from app.services.sources import (
-    GoogleConnectError,
+from app.services.sources import get_source
+from app.services.sources.google_oauth import (
     connect_google_source,
-    get_source,
     google_authorization_url,
 )
+from app.services.sources.types import GoogleConnectError
 
 router = APIRouter()
 
