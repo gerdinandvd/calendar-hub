@@ -12,9 +12,15 @@ python -m venv .venv
 
 Plain `pytest` skips Docker integration and formal/long (`slow`) tests. On Linux or macOS the venv points at `.venv/bin/python` instead of `.venv\Scripts\python`.
 
+Coverage on `app/` (branch, default suite only; not in every plain `pytest` run):
+
+```text
+.venv\Scripts\pytest --cov=app --cov-branch --cov-report=term-missing
+```
+
 ## Lint
 
-Dev install includes Ruff, Pylint, and Pyright. Format and lint with Ruff on `app/` and `tests/`; run Pylint design checks and Pyright type checks on `app/`:
+Dev install includes Ruff, Pylint, Pyright, and pytest-cov. Format and lint with Ruff on `app/` and `tests/`; run Pylint design checks and Pyright type checks on `app/`:
 
 ```text
 .venv\Scripts\ruff check app tests
