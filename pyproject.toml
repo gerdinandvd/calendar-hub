@@ -77,6 +77,7 @@ reportMissingTypeStubs = false
 [tool.pylint.main]
 py-version = "3.12"
 jobs = 0
+load-plugins = ["pylint.extensions.mccabe"]
 ignore-paths = [
     "^tests/",
     "^deploy/",
@@ -86,16 +87,22 @@ ignore-paths = [
 disable = ["all"]
 enable = [
     "duplicate-code",
+    "too-complex",
     "too-many-ancestors",
     "too-many-arguments",
     "too-many-branches",
     "too-many-instance-attributes",
+    "too-many-lines",
     "too-many-locals",
     "too-many-nested-blocks",
     "too-many-public-methods",
     "too-many-return-statements",
     "too-many-statements",
 ]
+
+[tool.pylint.format]
+# Floor for current app/ (largest module ~999 physical lines); tighten later.
+max-module-lines = 1000
 
 [tool.pylint.design]
 # Calibrated to current app/; tighten only, do not raise without review.
@@ -109,6 +116,7 @@ max-public-methods = 20
 max-returns = 13
 max-statements = 89
 max-nested-blocks = 5
+max-complexity = 32
 
 [tool.pylint.similarities]
 # Floor for current app/; small shared helpers still trip default 4-line matches.
