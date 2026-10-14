@@ -518,6 +518,93 @@ def test_webhook_upsert_is_readable_via_caldav(stack: dict[str, str]) -> None:
     assert b"SUMMARY:Webhook title" in stored
 
 
+@pytest.mark.integration
+def test_caldav_discovery_and_ics_readonly_acl(stack: dict[str, str]) -> None:
+    owner = _basic(stack["HUB_USER"], stack["HUB_PASSWORD"])
+    user = stack["HUB_USER"]
+    _make_room(owner, 2)
+    server, feed_url = _feed_server(_calendar(1))
+    webhook_id = ""
+    ics_id = ""
+    try:
+        status, webhook = _json_call(
+            "POST",
+            "/api/sources",
+            owner,
+            {"name": "ACL webhook", "kind": "webhook"},
+        )
+        assert status == 201, webhook
+        webhook_id = webhook["id"]
+        webhook_collection = urlparse(webhook["collection_url"]).path
+
+        status, ics = _json_call(
+            "POST",
+            "/api/sources",
+            owner,
+            {
+                "name": "ACL feed",
+                "kind": "ics",
+                "ics_url": feed_url,
+                "ics_allow_http": 1,
+                "poll_seconds": 86400,
+            },
+        )
+        assert status == 201, ics
+        ics_id = ics["id"]
+        assert f"/ics-{ics_id}/" in ics["collection_path"]
+        ics_collection = urlparse(ics["collection_url"]).path
+
+        list_body = (
+            b"<?xml version='1.0' encoding='utf-8'?>"
+            b"<D:propfind xmlns:D='DAV:' xmlns:C='urn:ietf:params:xml:ns:caldav' "
+            b"xmlns:A='http://apple.com/ns/ical/'>"
+            b"<D:prop><D:displayname/><D:resourcetype/><A:calendar-color/></D:prop>"
+            b"</D:propfind>"
+        )
+        status, listing, _ = _https(
+            "PROPFIND",
+            f"/radicale/{quote(user)}/",
+            {
+                "Authorization": owner,
+                "Depth": "1",
+                "Content-Type": "application/xml",
+            },
+            list_body,
+        )
+        assert status == 207, listing[:400]
+        assert webhook_id.encode() in listing
+        assert f"ics-{ics_id}".encode() in listing
+
+        probe = _event_bytes("acl-probe", "ACL probe")
+        status, _, _ = _https(
+            "PUT",
+            f"{ics_collection}probe.ics",
+            {"Authorization": owner, "Content-Type": "text/calendar"},
+            probe,
+        )
+        assert status == 403, status
+
+        status, _, _ = _https(
+            "PUT",
+            f"{webhook_collection}probe.ics",
+            {"Authorization": owner, "Content-Type": "text/calendar"},
+            probe,
+        )
+        assert status in {200, 201, 204}, status
+
+        status, ics_props = _propfind(ics_collection, owner)
+        assert status == 207, ics_props[:300]
+        status, webhook_props = _propfind(webhook_collection, owner)
+        assert status == 207, webhook_props[:300]
+    finally:
+        server.shutdown()
+        server.server_close()
+        for source_id in (webhook_id, ics_id):
+            if not source_id:
+                continue
+            _json_call("DELETE", f"/api/sources/{source_id}?confirm=true", owner, {})
+
+
 class _FeedHandler(BaseHTTPRequestHandler):
     body = b""
 
