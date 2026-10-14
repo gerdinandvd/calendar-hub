@@ -9,9 +9,8 @@
 </head>
 <body hx-on:htmx:after-settle="var node = document.getElementById('form-error') || document.getElementById('form-notice'); if (node) node.focus();">
   <header>
-    <p class="brand">{{ t('brand') }}</p>
+    <a class="brand" href="/" {% if section == "home" %}aria-current="page"{% endif %}>{{ t('brand') }}</a>
     <nav>
-      <a href="/" {% if section == "home" %}aria-current="page"{% endif %}>{{ t('nav.home') }}</a>
       <a href="/sources" {% if section == "sources" %}aria-current="page"{% endif %}>{{ t('nav.sources') }}</a>
       <a href="/calendars" {% if section == "calendars" %}aria-current="page"{% endif %}>{{ t('nav.calendars') }}</a>
       <a href="/sync" {% if section == "sync" %}aria-current="page"{% endif %}>{{ t('nav.sync') }}</a>

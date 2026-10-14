@@ -44,9 +44,11 @@ nav {
   gap: 0.35rem 1rem;
 }
 
-nav a[aria-current="page"] {
+nav a[aria-current="page"],
+.brand[aria-current="page"] {
   color: var(--primary);
   font-weight: 600;
+  text-decoration: underline;
   text-decoration-color: currentColor;
   text-decoration-thickness: 2px;
   text-underline-offset: 0.2em;
@@ -55,6 +57,8 @@ nav a[aria-current="page"] {
 .brand {
   margin: 0;
   font-weight: 600;
+  color: var(--primary);
+  text-decoration: none;
 }
 
 .lang {
