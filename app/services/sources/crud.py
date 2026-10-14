@@ -108,7 +108,8 @@ def create_source(
         if _name_taken(session, cleaned):
             return _field("name", "sentence.name_used")
     source_id = str(uuid.uuid4())
-    path = f"/{quote(owner, safe='')}/{source_id}/"
+    segment = f"ics-{source_id}" if kind == "ics" else source_id
+    path = f"/{quote(owner, safe='')}/{segment}/"
     color = KINDS[kind].color
     try:
         radicale.create_collection(path, cleaned, color)

@@ -7,13 +7,16 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from urllib.parse import urljoin, urlsplit
 
+from sqlalchemy import select
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session
 
 from app.db.models import Source, SourceSecret, SyncState
+from app.radicale.client import RadicaleError
 from app.secrets import SecretKeyError, decrypt
 from app.sync.apply import (
     CAPACITY_MESSAGE,
+    SAVE_MESSAGE,
     ImportResult,
     RunError,
     RunStats,
@@ -22,6 +25,7 @@ from app.sync.apply import (
     event_path,
     live_count,
     load_mapping,
+    new_uid,
     put_event,
     queue_until_capacity,
     read_event,
@@ -35,7 +39,8 @@ from app.sync.ical import (
     CalendarObject,
     CalendarParseError,
     build_object,
-    parse_vcalendar,
+    parse_feed,
+    with_stored_uid,
 )
 
 MAX_BYTES = 20 * 1024 * 1024
@@ -69,6 +74,8 @@ class FeedSnapshot:
     objects: tuple[CalendarObject, ...]
     etag: str | None
     last_modified: str | None
+    cal_name: str | None = None
+    cal_timezone: str | None = None
 
 
 def load_cursor(raw: str | None) -> FeedCursor | None:
@@ -146,13 +153,15 @@ def load_feed(
             raise IcsError(FETCH_MESSAGE)
         try:
             text = body.decode("utf-8-sig")
-            objects = parse_vcalendar(text, source_timezone)
+            feed = parse_feed(text, source_timezone)
         except (UnicodeError, CalendarParseError):
             raise IcsError(READ_MESSAGE) from None
         return FeedSnapshot(
-            objects=objects,
+            objects=feed.objects,
             etag=_clean(headers.get("etag")),
             last_modified=_clean(headers.get("last-modified")),
+            cal_name=feed.cal_name,
+            cal_timezone=feed.cal_timezone,
         )
 
 
@@ -265,6 +274,7 @@ def import_source(
     stats = _apply_snapshot(engine, radicale, source_id, collection, loaded, stop)
     if stop():
         raise Stopped(stats)
+    _apply_feed_meta(engine, radicale, source_id, collection, loaded)
     return ImportResult(stats, dump_cursor(loaded.etag, loaded.last_modified), True)
 
 
@@ -344,9 +354,9 @@ def _upsert_object(
         found = mapping is not None
         deleted = mapping.deleted_at if mapping is not None else None
         version = mapping.external_version if mapping is not None else None
-        ical_uid = mapping.ical_uid if mapping is not None else obj.uid
+        ical_uid = mapping.ical_uid if mapping is not None else new_uid()
     is_new = not found or deleted is not None
-    body = build_object(obj).encode("utf-8")
+    body = build_object(with_stored_uid(obj, ical_uid)).encode("utf-8")
     path = event_path(collection, ical_uid)
     if found and deleted is None and version == obj.version:
         current = read_event(radicale, path)
@@ -357,3 +367,41 @@ def _upsert_object(
     with Session(engine) as session, session.begin():
         remember(session, source_id, obj.uid, ical_uid, obj.version, when)
     return True, is_new
+
+
+def _apply_feed_meta(
+    engine: Engine,
+    radicale,
+    source_id: str,
+    collection: str,
+    loaded: FeedSnapshot,
+) -> None:
+    """Apply X-WR calendar fields after a full successful event write."""
+
+    if not loaded.cal_name and not loaded.cal_timezone:
+        return
+    rename: str | None = None
+    color: str | None = None
+    with Session(engine) as session, session.begin():
+        row = session.get(Source, source_id)
+        if row is None:
+            return
+        if loaded.cal_timezone and loaded.cal_timezone != row.timezone:
+            row.timezone = loaded.cal_timezone
+        if loaded.cal_name and loaded.cal_name != row.name:
+            taken = session.scalar(
+                select(Source.id).where(
+                    Source.name == loaded.cal_name,
+                    Source.id != source_id,
+                )
+            )
+            if taken is None:
+                row.name = loaded.cal_name
+                rename = loaded.cal_name
+                color = row.color
+    if rename is None or color is None:
+        return
+    try:
+        radicale.update_properties(collection, rename, color)
+    except RadicaleError:
+        raise RunError(SAVE_MESSAGE) from None

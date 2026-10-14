@@ -49,6 +49,15 @@ class CalendarObject:
     components: tuple[CalendarEvent, ...]
 
 
+@dataclass(frozen=True)
+class CalendarFeed:
+    """Parsed VCALENDAR: events plus optional calendar-level feed fields."""
+
+    objects: tuple[CalendarObject, ...]
+    cal_name: str | None = None
+    cal_timezone: str | None = None
+
+
 @dataclass
 class _Instant:
     kind: str

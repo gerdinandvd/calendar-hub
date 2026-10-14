@@ -13,6 +13,9 @@
   {% if source.kind == "private" %}
   <p>{{ t('hint.private') }}</p>
   {% endif %}
+  {% if source.kind == "ics" %}
+  <p>{{ t('hint.ics_readonly') }}</p>
+  {% endif %}
   {% if sync_error %}
   <p>{{ sync_error }}</p>
   {% endif %}

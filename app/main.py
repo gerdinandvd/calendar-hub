@@ -17,7 +17,10 @@ from app.db.session import make_engine
 from app.health import Heartbeat
 from app.log import configure_logging
 from app.radicale.client import RadicaleClient
-from app.services.sources.sync_ops import ensure_sync_states
+from app.services.sources.sync_ops import (
+    ensure_sync_states,
+    migrate_ics_collection_paths,
+)
 from app.sync.runner import arm
 from app.sync.scheduler import Scheduler
 from app.ui.pages import router as pages_router
@@ -33,6 +36,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             connection.exec_driver_sql("SELECT 1")
         Base.metadata.create_all(engine)
         ensure_sync_states(engine)
+        migrate_ics_collection_paths(engine, app.state.radicale)
         app.state.webhook_rates = RateLimiter()
         arm()
         heartbeat = Heartbeat()

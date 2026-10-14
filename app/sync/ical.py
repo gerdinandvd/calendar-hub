@@ -1,11 +1,13 @@
 """The only module that builds and reads VEVENT objects."""
 
 import re
+from dataclasses import replace
 from datetime import UTC, date, datetime, timedelta
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from app.sync.ical_types import (
     CalendarEvent,
+    CalendarFeed,
     CalendarObject,
     CalendarParseError,
     Mark,
@@ -14,12 +16,15 @@ from app.sync.ical_types import (
 
 __all__ = [
     "CalendarEvent",
+    "CalendarFeed",
     "CalendarObject",
     "CalendarParseError",
     "Mark",
     "build_object",
     "build_vcalendar",
+    "parse_feed",
     "parse_vcalendar",
+    "with_stored_uid",
 ]
 
 _CLOCK = re.compile(r"^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})?$")
@@ -38,15 +43,35 @@ def build_object(obj: CalendarObject) -> str:
     return _calendar(obj.components)
 
 
+def with_stored_uid(obj: CalendarObject, ical_uid: str) -> CalendarObject:
+    """Rewrite component UIDs for Radicale while keeping the external feed UID."""
+
+    return CalendarObject(
+        uid=obj.uid,
+        version=obj.version,
+        components=tuple(replace(item, uid=ical_uid) for item in obj.components),
+    )
+
+
 def parse_vcalendar(text: str, source_timezone: str) -> tuple[CalendarObject, ...]:
     """Read one VCALENDAR. A bad document raises before any object is returned."""
 
-    zone = _zone(source_timezone)
+    return parse_feed(text, source_timezone).objects
+
+
+def parse_feed(text: str, source_timezone: str) -> CalendarFeed:
+    """Read one VCALENDAR with optional X-WR calendar fields."""
+
+    events, cal_name, cal_timezone = _read_calendar(text)
+    zone_name = source_timezone.strip()
+    if cal_timezone and _timezone_name_ok(cal_timezone):
+        zone_name = cal_timezone.strip()
+    zone = _zone(zone_name)
     grouped: dict[str, list[CalendarEvent]] = {}
     versions: dict[str, str] = {}
     order: list[str] = []
-    for raw in _read_events(text):
-        event, is_master, version = _project(raw, zone, source_timezone.strip())
+    for raw in events:
+        event, is_master, version = _project(raw, zone, zone_name)
         if event.uid not in grouped:
             grouped[event.uid] = []
             order.append(event.uid)
@@ -65,7 +90,29 @@ def parse_vcalendar(text: str, source_timezone: str) -> tuple[CalendarObject, ..
         master_stamp = version
         components = tuple(_with_stamp(item, master_stamp) for item in grouped[uid])
         objects.append(CalendarObject(uid=uid, version=version, components=components))
-    return tuple(objects)
+    name = _clean_cal_text(cal_name)
+    zone_out = cal_timezone.strip() if cal_timezone and _timezone_name_ok(cal_timezone) else None
+    return CalendarFeed(objects=tuple(objects), cal_name=name, cal_timezone=zone_out)
+
+
+def _timezone_name_ok(value: str) -> bool:
+    text = value.strip()
+    if not text or any(char in text for char in "\r\n"):
+        return False
+    try:
+        ZoneInfo(text)
+    except (ZoneInfoNotFoundError, ValueError, KeyError):
+        return False
+    return True
+
+
+def _clean_cal_text(value: str | None) -> str | None:
+    if value is None:
+        return None
+    text = _unescape(value).strip()
+    if not text or any(char in text for char in "\r\n"):
+        return None
+    return text
 
 
 def _with_stamp(event: CalendarEvent, master_stamp: str) -> CalendarEvent:
@@ -204,7 +251,9 @@ def _zone(name: str) -> ZoneInfo:
         raise CalendarParseError() from None
 
 
-def _read_events(text: str) -> list[list[tuple[str, dict[str, str], str]]]:
+def _read_calendar(
+    text: str,
+) -> tuple[list[list[tuple[str, dict[str, str], str]]], str | None, str | None]:
     lines = _unfold(text)
     if not lines or lines[0].upper() != "BEGIN:VCALENDAR":
         raise CalendarParseError()
@@ -213,6 +262,8 @@ def _read_events(text: str) -> list[list[tuple[str, dict[str, str], str]]]:
     skip_at: int | None = None
     props: list[tuple[str, dict[str, str], str]] = []
     events: list[list[tuple[str, dict[str, str], str]]] = []
+    cal_name: str | None = None
+    cal_timezone: str | None = None
     closed = False
     for line in lines:
         name, params, value = _content(line)
@@ -248,9 +299,14 @@ def _read_events(text: str) -> list[list[tuple[str, dict[str, str], str]]]:
             raise CalendarParseError()
         if vevent_at is not None and depth == vevent_at:
             props.append((name, params, value))
+        elif depth == 1 and vevent_at is None and skip_at is None:
+            if name == "X-WR-CALNAME" and cal_name is None:
+                cal_name = value
+            elif name == "X-WR-TIMEZONE" and cal_timezone is None:
+                cal_timezone = value
     if not closed or depth != 0:
         raise CalendarParseError()
-    return events
+    return events, cal_name, cal_timezone
 
 
 def _unfold(text: str) -> list[str]:

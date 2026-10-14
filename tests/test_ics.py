@@ -248,6 +248,18 @@ def _puts(fake: FakeRadicale) -> list[tuple]:
     return [call for call in fake.calls if call[0] == "put"]
 
 
+def _mapping(mappings: list[dict], external_id: str) -> dict:
+    return next(row for row in mappings if row["external_id"] == external_id)
+
+
+def _event_path(collection: str, mappings: list[dict], external_id: str) -> str:
+    return f"{collection}{_mapping(mappings, external_id)['ical_uid']}.ics"
+
+
+def _event_body(fake: FakeRadicale, collection: str, mappings: list[dict], external_id: str) -> str:
+    return fake.events[_event_path(collection, mappings, external_id)].decode()
+
+
 def test_limits_are_the_design_defaults() -> None:
     assert TIMEOUT_SECONDS == 30
     assert MAX_BYTES == 20 * 1024 * 1024
@@ -312,36 +324,32 @@ def test_import_keeps_fields_and_a_second_run_does_not_rewrite(
         local = created["collection_path"] + "local.ics"
         fake.events[local] = b"BEGIN:VCALENDAR\r\nEND:VCALENDAR\r\n"
 
+        assert created["collection_path"] == f"/owner/ics-{created['id']}/"
         assert _sync(client, created["id"]).status_code == 202
         assert wait_for(client.app.state.engine, created["id"]) == "ok"
-        stored = {path: body.decode() for path, body in fake.events.items()}
-        series_body = next(
-            body for path, body in stored.items() if path.endswith("series-1.ics")
-        )
+        collection = created["collection_path"]
+        mappings = _mappings(client.app.state.engine, created["id"])
+        assert len(mappings) == 4
+        series_row = _mapping(mappings, "series-1")
+        assert series_row["ical_uid"] != "series-1"
+        assert series_row["external_version"] == "20261001T080000Z"
+        series_body = _event_body(fake, collection, mappings, "series-1")
         assert series_body.count("BEGIN:VEVENT") == 2
+        assert f"UID:{series_row['ical_uid']}" in series_body
         assert "RRULE:FREQ=WEEKLY;BYDAY=MO" in series_body
         assert "EXDATE;TZID=Europe/Amsterdam:20261014T090015" in series_body
         assert "RECURRENCE-ID;TZID=Europe/Amsterdam:20261021T090015" in series_body
         assert "DTSTART;TZID=Europe/Amsterdam:20261007T090015" in series_body
-        day = next(body for path, body in stored.items() if path.endswith("day-1.ics"))
+        day = _event_body(fake, collection, mappings, "day-1")
         assert "DTSTART;VALUE=DATE:20261007" in day
         assert "TZID" not in day
-        utc = next(body for path, body in stored.items() if path.endswith("utc-1.ics"))
+        utc = _event_body(fake, collection, mappings, "utc-1")
         assert "DTSTART;TZID=Europe/Amsterdam:20261007T090015" in utc
-        keep = next(
-            body for path, body in stored.items() if path.endswith("keep-1.ics")
-        )
+        keep = _event_body(fake, collection, mappings, "keep-1")
         assert "DTSTART;TZID=Europe/Amsterdam:20261007T0900\r\n" in keep
-        mappings = _mappings(client.app.state.engine, created["id"])
-        assert len(mappings) == 4
-        series_row = next(row for row in mappings if row["external_id"] == "series-1")
-        assert series_row["ical_uid"] == "series-1"
-        assert series_row["external_version"] == "20261001T080000Z"
         assert fake.events[local] == b"BEGIN:VCALENDAR\r\nEND:VCALENDAR\r\n"
         assert feed.requests[0]["authorization"] == HEADER
-        kept_at = next(
-            row["last_synced_at"] for row in mappings if row["external_id"] == "keep-1"
-        )
+        kept_at = _mapping(mappings, "keep-1")["last_synced_at"]
         puts = len(_puts(fake))
 
         feed.default = _calendar(
@@ -373,11 +381,11 @@ def test_import_keeps_fields_and_a_second_run_does_not_rewrite(
         assert len(_puts(fake)) == puts + 1
         again = _mappings(client.app.state.engine, created["id"])
         assert len(again) == 4
-        kept = next(row for row in again if row["external_id"] == "keep-1")
+        kept = _mapping(again, "keep-1")
         assert kept["last_synced_at"] == kept_at
-        gone = next(row for row in again if row["external_id"] == "utc-1")
+        gone = _mapping(again, "utc-1")
         assert gone["deleted_at"]
-        assert not any(path.endswith("utc-1.ics") for path in fake.events)
+        assert _event_path(collection, again, "utc-1") not in fake.events
         assert fake.events[local] == b"BEGIN:VCALENDAR\r\nEND:VCALENDAR\r\n"
     finally:
         _close(client)
@@ -415,13 +423,14 @@ def test_not_modified_and_failures_leave_the_collection(
         )
         assert feed.requests[-1]["if_none_match"] == '"feed"'
 
+        success_at = after["last_success_at"]
         feed.status = 200
         feed.default = b"this is not a calendar"
         assert _sync(client, created["id"]).status_code == 202
         assert wait_for(client.app.state.engine, created["id"]) == "error"
         failed = _state(client.app.state.engine, created["id"])
         assert failed["last_error_message"] == READ_MESSAGE
-        assert failed["last_success_at"] == before["last_success_at"]
+        assert failed["last_success_at"] == success_at
         assert failed["cursor"] == cursor
         assert len(_puts(fake)) == puts
         assert "Traceback" not in failed["last_error_message"]
@@ -432,7 +441,7 @@ def test_not_modified_and_failures_leave_the_collection(
         assert wait_for(client.app.state.engine, created["id"]) == "error"
         large = _state(client.app.state.engine, created["id"])
         assert large["last_error_message"] == SIZE_MESSAGE
-        assert large["last_success_at"] == before["last_success_at"]
+        assert large["last_success_at"] == success_at
         assert len(fake.events) == 1
 
         feed.content_length = None
@@ -442,7 +451,7 @@ def test_not_modified_and_failures_leave_the_collection(
         assert wait_for(client.app.state.engine, created["id"], timeout=3) == "error"
         timed = _state(client.app.state.engine, created["id"])
         assert timed["last_error_message"] == TIMEOUT_MESSAGE
-        assert timed["last_success_at"] == before["last_success_at"]
+        assert timed["last_success_at"] == success_at
         assert len(fake.events) == 1
         feed.hold.set()
     finally:
@@ -504,7 +513,13 @@ def test_redirect_scheme_is_rejected_and_same_scheme_is_followed(
         feed.bodies["/calendar.ics"] = _calendar(*_event("moved"))
         assert _sync(client, created["id"]).status_code == 202
         assert wait_for(client.app.state.engine, created["id"]) == "ok"
-        assert any(path.endswith("moved.ics") for path in fake.events)
+        moved = _mappings(client.app.state.engine, created["id"])
+        assert any(
+            path.endswith(f"{row['ical_uid']}.ics")
+            for path in fake.events
+            for row in moved
+            if row["external_id"] == "moved"
+        )
         assert [item["path"] for item in feed.requests[-2:]] == [
             "/start",
             "/calendar.ics",
@@ -812,11 +827,13 @@ def test_event_limit_keeps_written_events_and_the_cursor(
         assert failed["last_error_message"] == CAPACITY_MESSAGE
         assert failed["cursor"] == before["cursor"]
         assert failed["last_success_at"] == before["last_success_at"]
-        assert any(path.endswith("/new-a.ics") for path in fake.events)
-        assert not any(path.endswith("/new-b.ics") for path in fake.events)
         rows = _mappings(client.app.state.engine, created["id"])
         assert {row["external_id"] for row in rows} == {"one", "new-a"}
-        kept = next(row for row in rows if row["external_id"] == "one")
+        assert _event_path(collection, rows, "new-a") in fake.events
+        assert not any(
+            row["external_id"] == "new-b" for row in rows
+        )
+        kept = _mapping(rows, "one")
         assert kept["last_synced_at"] == synced
         assert fake.count_events(collection) == MAX_EVENTS
 
@@ -828,8 +845,119 @@ def test_event_limit_keeps_written_events_and_the_cursor(
         assert wait_for(client.app.state.engine, created["id"]) == "ok"
         edited = _state(client.app.state.engine, created["id"])
         assert edited["cursor"] != before["cursor"]
-        assert b"DTSTAMP:20261002T080000Z" in fake.events[f"{collection}one.ics"]
+        rows = _mappings(client.app.state.engine, created["id"])
+        assert b"DTSTAMP:20261002T080000Z" in fake.events[
+            _event_path(collection, rows, "one")
+        ]
         assert fake.count_events(collection) == MAX_EVENTS
     finally:
         _close(client)
         _close_server(server)
+
+
+def test_feed_uid_with_spaces_gets_a_safe_radicale_uid(
+    tmp_path: Path, monkeypatch
+) -> None:
+    feed = Feed()
+    server, base = _server(feed)
+    client, fake = _open(tmp_path, monkeypatch)
+    try:
+        messy = "Ical2026-10-14T10:00:00ICT3.1 Onderzoeksplanning@rooster.avans.one"
+        feed.default = _calendar(
+            "BEGIN:VEVENT",
+            f"UID:{messy}",
+            "DTSTAMP:20261001T080000Z",
+            "DTSTART;TZID=Europe/Amsterdam:20261007T090015",
+            "DTEND;TZID=Europe/Amsterdam:20261007T100015",
+            "SUMMARY:Lesson",
+            "END:VEVENT",
+        )
+        created = _create(client, f"{base}/feed.ics")
+        assert _sync(client, created["id"]).status_code == 202
+        assert wait_for(client.app.state.engine, created["id"]) == "ok"
+        rows = _mappings(client.app.state.engine, created["id"])
+        assert len(rows) == 1
+        assert rows[0]["external_id"] == messy
+        assert " " not in rows[0]["ical_uid"]
+        assert ":" not in rows[0]["ical_uid"]
+        body = _event_body(fake, created["collection_path"], rows, messy)
+        assert f"UID:{rows[0]['ical_uid']}" in body
+        assert "SUMMARY:Lesson" in body
+    finally:
+        _close(client)
+        _close_server(server)
+
+
+def test_feed_metadata_updates_name_and_timezone(
+    tmp_path: Path, monkeypatch
+) -> None:
+    feed = Feed()
+    server, base = _server(feed)
+    client, fake = _open(tmp_path, monkeypatch)
+    try:
+        feed.default = (
+            "BEGIN:VCALENDAR\r\nVERSION:2.0\r\n"
+            "X-WR-CALNAME:Avans Rooster\r\n"
+            "X-WR-TIMEZONE:Europe/Berlin\r\n"
+            + "\r\n".join(_event("meta-1"))
+            + "\r\nEND:VCALENDAR\r\n"
+        ).encode()
+        created = _create(client, f"{base}/feed.ics", name="Feed")
+        assert created["timezone"] == "Europe/Amsterdam"
+        assert _sync(client, created["id"]).status_code == 202
+        assert wait_for(client.app.state.engine, created["id"]) == "ok"
+        detail = client.get(f"/api/sources/{created['id']}").json()
+        assert detail["name"] == "Avans Rooster"
+        assert detail["timezone"] == "Europe/Berlin"
+        assert (
+            "proppatch",
+            created["collection_path"],
+            "Avans Rooster",
+            "#f9ab00",
+        ) in fake.calls
+        page = client.get(f"/sources/{created['id']}")
+        assert page.status_code == 200
+        assert "alleen-lezen" in page.text or "read-only" in page.text
+    finally:
+        _close(client)
+        _close_server(server)
+
+
+def test_migrate_ics_collection_paths_moves_legacy_collections(
+    tmp_path: Path, monkeypatch
+) -> None:
+    client, fake = _open(tmp_path, monkeypatch)
+    try:
+        created = _create(client, "https://example.com/legacy.ics")
+        legacy = f"/owner/{created['id']}/"
+        modern = f"/owner/ics-{created['id']}/"
+        with Session(client.app.state.engine) as session, session.begin():
+            row = session.get(Source, created["id"])
+            assert row is not None
+            row.collection_path = legacy
+            session.add(
+                EventMapping(
+                    id="map-1",
+                    source_id=created["id"],
+                    external_id="old",
+                    ical_uid="old",
+                    external_version="1",
+                    last_synced_at="2026-01-01T00:00:00Z",
+                    deleted_at=None,
+                )
+            )
+            state = session.get(SyncState, created["id"])
+            assert state is not None
+            state.cursor = '{"etag":"x"}'
+        fake.events[f"{legacy}old.ics"] = b"x"
+        from app.services.sources.sync_ops import migrate_ics_collection_paths
+
+        migrate_ics_collection_paths(client.app.state.engine, fake)
+        detail = client.get(f"/api/sources/{created['id']}").json()
+        assert detail["collection_path"] == modern
+        assert ("create", modern, created["name"], "#f9ab00") in fake.calls
+        assert ("delete", legacy) in fake.calls
+        assert _mappings(client.app.state.engine, created["id"]) == []
+        assert _state(client.app.state.engine, created["id"])["cursor"] is None
+    finally:
+        _close(client)

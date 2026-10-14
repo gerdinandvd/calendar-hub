@@ -5,5 +5,6 @@
 set -eu
 
 /venv/bin/python /usr/local/bin/calendar-hub-radicale-users.py
+/venv/bin/python /usr/local/bin/calendar-hub-radicale-rights.py
 /venv/bin/python /usr/local/bin/calendar-hub-radicale-tune.py
 exec /usr/local/bin/docker-entrypoint.sh /venv/bin/radicale --config /config/config
