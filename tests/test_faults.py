@@ -354,8 +354,9 @@ def test_failed_etag_retry_on_ics_keeps_the_first_write(
         assert "added" in rows
         assert "blocked" not in rows
         assert store.deletes == []
-        assert any(path.endswith("/added.ics") for path in store.events)
-        assert not any(path.endswith("/blocked.ics") for path in store.events)
+        collection = created["collection_path"]
+        mappings = list(rows.values())
+        assert ics_tests._event_path(collection, mappings, "added") in store.events
         assert "radicale_error method=PUT status=500" in caplog.text
         assert "Traceback" not in caplog.text
         assert f"source_id={created['id']}" in caplog.text

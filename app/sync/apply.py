@@ -147,6 +147,15 @@ def put_event(radicale: RadicaleClient, path: str, body: bytes, *, fresh: bool) 
         raise RunError(SAVE_MESSAGE) from None
 
 
+def update_collection_properties(
+    radicale: RadicaleClient, path: str, display_name: str, color: str
+) -> None:
+    try:
+        radicale.update_properties(path, display_name, color)
+    except RadicaleError:
+        raise RunError(SAVE_MESSAGE) from None
+
+
 def read_event(radicale: RadicaleClient, path: str) -> bytes | None:
     try:
         return radicale.get_event(path)

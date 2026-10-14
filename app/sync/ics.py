@@ -12,11 +12,9 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session
 
 from app.db.models import Source, SourceSecret, SyncState
-from app.radicale.client import RadicaleError
 from app.secrets import SecretKeyError, decrypt
 from app.sync.apply import (
     CAPACITY_MESSAGE,
-    SAVE_MESSAGE,
     ImportResult,
     RunError,
     RunStats,
@@ -31,6 +29,7 @@ from app.sync.apply import (
     read_event,
     remember,
     reraise,
+    update_collection_properties,
     utc_now,
     write_parallel,
 )
@@ -401,7 +400,4 @@ def _apply_feed_meta(
                 color = row.color
     if rename is None or color is None:
         return
-    try:
-        radicale.update_properties(collection, rename, color)
-    except RadicaleError:
-        raise RunError(SAVE_MESSAGE) from None
+    update_collection_properties(radicale, collection, rename, color)
