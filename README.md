@@ -45,6 +45,8 @@ Five services should be running: `hub`, `radicale`, `caddy`, `litestream`, and `
 
 `HUB_HOST` is the host shown for CalDAV. Locally that is `localhost:8443`, so the collection URL includes the published port. The hub reaches Radicale at `HUB_RADICALE_URL` (`http://radicale:5232` on the Docker network) with the internal account. That account is not shown in the admin pages.
 
+`HUB_CADDY_SITES` is the comma-separated list of names Caddy serves, without a scheme. The local default is `localhost, 127.0.0.1`. `HUB_TLS=internal` uses Caddy's local certificate. On a public host, set `HUB_TLS=public` in that host's environment file so Caddy requests a public certificate for the configured names. In that mode the container still answers on `127.0.0.1` with the local certificate, which is what the healthcheck calls. Keep the public name in the server's environment file.
+
 Add a private source from Sources. The calendars page lists its name, color, and collection URL. Clients sign in as `HUB_USER` on that URL. Turning a source off keeps the collection. Deleting a source asks you to confirm, because the collection is deleted with it.
 
 Add a webhook from Sources. The page shows the endpoint and the secret once. After that it says the secret is set. Rotate secret replaces it immediately. The sync page shows whether the last run succeeded. A webhook with the source turned off is refused and does not change the calendar.

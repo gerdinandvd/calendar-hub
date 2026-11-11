@@ -1,10 +1,6 @@
-{
-	auto_https disable_redirects
-}
-
-https://localhost, https://127.0.0.1 {
-	tls internal
-
+# Routes for the hub. The site address and TLS mode are added at start
+# from HUB_CADDY_SITES and HUB_TLS.
+(hub) {
 	@internal_account {
 		path /radicale /radicale/*
 		header Authorization "Basic {$HUB_INTERNAL_BASIC}"
