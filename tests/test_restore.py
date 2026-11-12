@@ -318,7 +318,7 @@ def test_restore_exercise_brings_back_source_and_event(tmp_path: Path) -> None:
                 f"{(ROOT / 'deploy' / 'litestream-entrypoint.sh').resolve().as_posix()}:/usr/local/bin/calendar-hub-litestream.sh:ro",
                 "--entrypoint",
                 "/bin/sh",
-                "litestream/litestream:0.5.17",
+                "litestream/litestream:0.5.18",
                 "/usr/local/bin/calendar-hub-litestream.sh",
                 "restore",
             ],

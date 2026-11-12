@@ -26,11 +26,19 @@ done
 
 mkdir -p /status /tmp
 umask 077
+# L0 cleanup lists the replica. The 15s default exhausted the free Backblaze
+# Class C cap on an idle database. Hourly cleanup stays under that cap.
+# sync-interval stays 1s, so the replica lag stays about a second.
+# Litestream 0.5.18 skips idle compaction lists. A later release may bound
+# idle L0 lists; until then this interval is the cap.
 cat > /tmp/litestream.yml <<EOF
+l0-retention: 1h
+l0-retention-check-interval: 1h
 dbs:
   - path: ${DB}
     replica:
       url: "${REPLICA_URL}"
+      sync-interval: 1s
 EOF
 
 last=0
