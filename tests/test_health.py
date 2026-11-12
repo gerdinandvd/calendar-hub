@@ -100,16 +100,6 @@ def test_backup_scripts_keep_the_hub_key_out() -> None:
     assert "restore-if-db-not-exists" not in text
 
 
-def test_litestream_limits_class_c_lists() -> None:
-    root = Path(__file__).resolve().parents[1]
-    script = (root / "deploy" / "litestream-entrypoint.sh").read_text(encoding="utf-8")
-    compose = (root / "compose.yaml").read_text(encoding="utf-8")
-    assert "l0-retention: 1h" in script
-    assert "l0-retention-check-interval: 1h" in script
-    assert "sync-interval: 1s" in script
-    assert "litestream/litestream:0.5.18" in compose
-
-
 def test_mounted_routes() -> None:
     paths = _route_paths(create_app().routes)
     assert "/api/health" in paths

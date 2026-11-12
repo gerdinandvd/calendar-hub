@@ -1,5 +1,4 @@
 # Runtime config is written by deploy/litestream-entrypoint.sh.
-# The replica syncs every second. L0 retention is checked once an hour.
 # Local replica: file:///replica/hub
 # VPS replica: s3://PRIVATE-BUCKET/hub?endpoint=s3.REGION.backblazeb2.com&region=REGION
 # Credentials stay in the environment (AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY).
