@@ -13,8 +13,9 @@ Status: **open** until checked. Pick before coding that slice.
 
 - [ ] **A** `GET /events?q=`
 - [ ] **B** Separate `GET /events/search`
+- [x] **C** Two MCP intents (`list_events` / `search_events`); one HTTP `GET /events` (+ optional `q=`); distinct tool defaults; responses echo `window` / `q` / `truncated` / `applied_defaults`
 
-Prefer **B** if list defaults (time window) clash with open search semantics.
+**Chosen: C.** Predictability lives in tool contracts + response echo, not in a second URL. `q=` on list = filter inside the time window; open search is the other tool (require `q`, optional/explicit window — no silent week default). Path split only if that later proves clearer.
 
 ## D3 — Agent create vs webhook JSON
 
