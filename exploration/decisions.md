@@ -4,10 +4,10 @@ Status: **open** until checked. Pick before coding that slice.
 
 ## D1 — MCP hosting
 
-- [ ] **A** Same process as hub (`/mcp`)
+- [x] **A** Same process as hub (`/mcp`)
 - [ ] **B** Tiny sidecar → Agent HTTP only
 
-Default lean: **A**. Revisit if RAM/latency hurts.
+**Chosen: A.** Stays on the VPS in the hub process; no separate hosting/container. Revisit only if RAM/latency hurts.
 
 ## D2 — Search endpoint shape
 
