@@ -35,8 +35,10 @@ Status: **open** until checked. Pick before coding that slice.
 ## D5 — Delete semantics
 
 - [ ] **A** Hard delete immediately
-- [ ] **B** Confirm flag required
+- [x] **B** Confirm flag required
 - [ ] **C** Soft-delete / grace
+
+**Chosen: B.** Destructive deletes need an explicit confirm step (token/flag), tuned for AX — clear preview of what will be deleted, short-lived token, no mystery second call. Soft-delete deferred unless undo proves necessary.
 
 ## D6 — Which calendars agents see by default
 
