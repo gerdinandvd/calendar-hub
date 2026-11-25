@@ -20,9 +20,9 @@ Status: **open** until checked. Pick before coding that slice.
 ## D3 — Agent create vs webhook JSON
 
 - [ ] **A** One JSON shape shared with webhook upsert
-- [ ] **B** Agent-native schema; webhook stays as today; shared domain only
+- [x] **B** Agent-native schema; webhook stays as today; shared domain only
 
-**A** = less surface. **B** = freer UX for agents.
+**Chosen: B.** Better agent experience (no webhook `action` / external-id dialect). Shared domain apply only; two JSON shapes is fine.
 
 ## D4 — Event ids exposed to agents
 
