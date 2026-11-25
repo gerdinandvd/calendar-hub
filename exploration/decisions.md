@@ -26,11 +26,11 @@ Status: **open** until checked. Pick before coding that slice.
 
 ## D4 — Event ids exposed to agents
 
-- [ ] **A** Hub opaque id (mapping table)
+- [x] **A** Hub opaque id (mapping table)
 - [ ] **B** CalDAV uid / href
 - [ ] **C** Both (`id` + `uid`)
 
-Agents need stable ids across list → get → update.
+**Chosen: A (for now).** Stable hub ids for list → get → update; CalDAV stays behind the mapping. Revisit RAM/SQLite cost on the 2 GB VPS only at the end with the other sizing tradeoffs.
 
 ## D5 — Delete semantics
 
