@@ -8,7 +8,7 @@ Not product docs. Not a commitment. A place to decide and then build.
 1. [architecture.md](architecture.md) — what stays true
 2. [surface.md](surface.md) — what agents/scripts call
 3. [security.md](security.md) — auth and trust boundaries
-4. [decisions.md](decisions.md) — open choices (numbered)
+4. [decisions.md](decisions.md) — locked choices (D1–D9)
 
 ## Constraint
 

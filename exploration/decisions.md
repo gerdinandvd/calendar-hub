@@ -1,6 +1,6 @@
-# Open decisions
+# Decisions
 
-Status: **open** until checked. Pick before coding that slice.
+Status: **D1–D9 decided.** Build order left open until the idea is further shaped.
 
 ## D1 — MCP hosting
 
@@ -70,15 +70,3 @@ Status: **open** until checked. Pick before coding that slice.
 - [ ] **C** never (use list + agent reason)
 
 **Chosen: B.** Ship list/search/get/write + MCP first; add `find_free_slots` / free-busy if agents keep misusing list for scheduling gaps.
-
-## D10 — Ship order
-
-Suggested:
-
-1. Domain query (filter/search/get) + caps  
-2. Domain write private (+ webhook apply reuse)  
-3. Agent HTTP + PAT  
-4. MCP wrapper  
-5. Admin token UI + audit  
-
-Change only if a decision above forces it.
