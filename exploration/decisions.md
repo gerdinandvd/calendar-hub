@@ -50,8 +50,10 @@ Status: **open** until checked. Pick before coding that slice.
 
 ## D7 — Auth phase 1
 
-- [ ] **A** PAT scopes only
+- [x] **A** PAT scopes only
 - [ ] **B** PAT now + stub OAuth metadata for later
+
+**Chosen: A.** Scoped Bearer PATs are enough for phase 1 (Cursor/Claude + scripts). OAuth metadata deferred until remote login clients actually need it.
 
 ## D8 — caldav-mcp
 
