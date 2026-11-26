@@ -1,6 +1,6 @@
 # Decisions
 
-Status: **D1–D9 decided.** Build order left open until the idea is further shaped.
+Status: **D1–D10 decided.** Build order and API contract details left open until the idea is further shaped.
 
 ## D1 — MCP hosting
 
@@ -70,3 +70,11 @@ Status: **D1–D9 decided.** Build order left open until the idea is further sha
 - [ ] **C** never (use list + agent reason)
 
 **Chosen: B.** Ship list/search/get/write + MCP first; add `find_free_slots` / free-busy if agents keep misusing list for scheduling gaps.
+
+## D10 — MCP library
+
+- [x] **A** Official Python SDK (`mcp`, v2 `MCPServer`)
+- [ ] **B** FastMCP (`fastmcp`)
+- [ ] **C** FastAPI-MCP (`fastapi-mcp` auto-bridge)
+
+**Chosen: A.** Mount Streamable HTTP in-process via `mcp.streamable_http_app()` (D1). Thin adapter over Agent HTTP with hand-written tools (D2 intents). FastMCP deferred — useful later for IdP/OAuth helpers, not required for PAT phase (D7) or resource-server OAuth later. FastAPI-MCP rejected: auto-exposing routes fights distinct MCP tool contracts.

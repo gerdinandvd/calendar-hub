@@ -29,7 +29,7 @@ adapters ───────────┼─ Webhooks (machines)
 ```
 
 Webhook and agent **share domain apply** (same write rules into Radicale). JSON shapes differ: webhook keeps today’s dialect; agents get a native schema (D3).
-MCP is a **thin adapter** over the Agent HTTP API (or shared domain calls), in the **same hub process** (D1).
+MCP is a **thin adapter** over the Agent HTTP API (or shared domain calls), in the **same hub process** (D1), using the **official Python SDK** (`mcp` / `MCPServer`) mounted as Streamable HTTP (D10).
 No second event store. No CalDAV-only bypass for hub policy.
 caldav-mcp is **out of product path** (D8).
 
@@ -38,7 +38,7 @@ caldav-mcp is **out of product path** (D8).
 | Option | Choice |
 |--------|--------|
 | Agent API | **In hub process** (`/api/agent/...`) |
-| MCP | **In hub process** (Streamable HTTP `/mcp`) — D1 |
+| MCP | **In hub process** (Streamable HTTP `/mcp`) — D1; lib = official `mcp` — D10 |
 | Extra container | **Avoid** on 2 GB |
 
 Caddy: agent routes outside basic auth; Bearer checked in app (like webhooks).
