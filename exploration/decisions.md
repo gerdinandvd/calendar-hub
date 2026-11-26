@@ -57,11 +57,11 @@ Status: **open** until checked. Pick before coding that slice.
 
 ## D8 — caldav-mcp
 
-- [ ] **A** Ignore for product path
+- [x] **A** Ignore for product path
 - [ ] **B** Optional personal shortcut (local stdio) while Agent API is built
 - [ ] **C** Document as unsupported parallel
 
-Does not replace hub policy/tokens.
+**Chosen: A.** Product path is hub Agent HTTP + MCP only. caldav-mcp stays out of scope (useful CalDAV client elsewhere; not hub policy/tokens).
 
 ## D9 — Free/busy tool
 
