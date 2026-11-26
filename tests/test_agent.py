@@ -6,6 +6,7 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 
 from app.main import create_app
+from app.mcp.runtime import bind as bind_mcp
 from app.services.agent import create_token
 
 JSON = {"Content-Type": "application/json"}
@@ -61,6 +62,7 @@ def _open(tmp_path: Path, monkeypatch) -> tuple[TestClient, FakeRadicale]:
     client.__enter__()
     fake = FakeRadicale()
     client.app.state.radicale = fake
+    bind_mcp(client.app.state.engine, fake, client.app.state.agent_confirms)
     return client, fake
 
 
@@ -298,5 +300,187 @@ def test_mcp_requires_bearer_and_lists_tools(tmp_path: Path, monkeypatch) -> Non
             "delete_event",
         }
         assert token.startswith("ch_")
+    finally:
+        _close(client)
+
+
+def test_agent_patch_search_fields_and_confirm(tmp_path: Path, monkeypatch) -> None:
+    client, fake = _open(tmp_path, monkeypatch)
+    try:
+        source = _private(client)
+        token = _bearer(client.app.state.engine)
+        auth = {"Authorization": f"Bearer {token}"}
+        created = client.post(
+            "/api/agent/v1/events",
+            headers={**auth, **JSON},
+            json={
+                "calendar": source["id"],
+                "summary": "Alpha",
+                "description": "Find me later",
+                "location": "Room",
+                "start": "2032-06-01T09:00:00",
+                "end": "2032-06-01T10:00:00",
+                "timezone": "UTC",
+                "status": "confirmed",
+                "rrule": "FREQ=DAILY;COUNT=3",
+            },
+        )
+        assert created.status_code == 200, created.text
+        event_id = created.json()["id"]
+
+        patched = client.patch(
+            f"/api/agent/v1/events/{event_id}",
+            headers={**auth, **JSON},
+            json={"summary": "Beta", "description": None, "location": "Hall"},
+        )
+        assert patched.status_code == 200, patched.text
+        assert patched.json()["summary"] == "Beta"
+
+        listed = client.get(
+            "/api/agent/v1/events",
+            headers=auth,
+            params={
+                "from": "2032-06-01T00:00:00",
+                "to": "2032-06-05T00:00:00",
+                "q": "Beta",
+                "fields": "standard",
+            },
+        )
+        assert listed.status_code == 200, listed.text
+        body = listed.json()
+        assert body["fields"] == "standard"
+        assert len(body["events"]) >= 1
+        assert body["events"][0]["location"] == "Hall"
+
+        from app.services.agent import list_or_search_events
+
+        searched = list_or_search_events(
+            client.app.state.engine,
+            fake,
+            mode="search",
+            q="Beta",
+            window_from="2032-06-01T00:00:00",
+            window_to="2032-06-10T00:00:00",
+            calendars=None,
+            limit=10,
+            cursor=None,
+            fields="full",
+        )
+        assert isinstance(searched, dict)
+        assert searched["q"] == "Beta"
+        assert searched["fields"] == "full"
+        assert searched["events"]
+
+        bad = client.delete(
+            f"/api/agent/v1/events/{event_id}",
+            headers=auth,
+            params={"confirm_token": "nope"},
+        )
+        assert bad.status_code == 422
+    finally:
+        _close(client)
+
+
+def test_expand_weekly_occurrences() -> None:
+    from datetime import UTC, datetime
+
+    from app.services.agent.expand import expand_object
+    from app.sync.ical_types import CalendarEvent, CalendarObject
+
+    master = CalendarEvent(
+        uid="series-1",
+        summary="Standup",
+        description="",
+        location="",
+        status=None,
+        start_value="20320601T090000",
+        end_value="20320601T093000",
+        all_day=False,
+        timezone="UTC",
+        rrule="FREQ=DAILY;COUNT=3",
+        dtstamp="20320601T000000Z",
+    )
+    obj = CalendarObject(uid="series-1", version="1", components=(master,))
+    found = expand_object(
+        obj,
+        datetime(2032, 6, 1, tzinfo=UTC),
+        datetime(2032, 6, 10, tzinfo=UTC),
+    )
+    assert len(found) == 3
+    assert found[0].is_occurrence is True
+
+
+def test_mcp_tools_call_services(tmp_path: Path, monkeypatch) -> None:
+    client, _fake = _open(tmp_path, monkeypatch)
+    try:
+        source = _private(client)
+        from app.mcp import server as mcp_server
+
+        calendars = mcp_server.list_calendars()
+        assert calendars["calendars"]
+        created = mcp_server.create_event_tool(
+            {
+                "calendar": source["id"],
+                "summary": "Via MCP",
+                "start": "2033-01-02T10:00:00",
+                "end": "2033-01-02T11:00:00",
+                "timezone": "UTC",
+            }
+        )
+        assert "id" in created
+        listed = mcp_server.list_events(
+            window_from="2033-01-01T00:00:00",
+            window_to="2033-01-08T00:00:00",
+        )
+        assert listed["events"]
+        got = mcp_server.get_event_tool(created["id"], fields="standard")
+        assert got["summary"] == "Via MCP"
+        updated = mcp_server.update_event_tool(created["id"], {"summary": "MCP2"})
+        assert updated["summary"] == "MCP2"
+        preview = mcp_server.delete_event_tool(created["id"])
+        assert "confirm_token" in preview
+        done = mcp_server.delete_event_tool(
+            created["id"], confirm_token=preview["confirm_token"]
+        )
+        assert done.get("ok") is True
+        searched = mcp_server.search_events(
+            q="missing-no-hits",
+            window_from="2033-01-01T00:00:00",
+            window_to="2033-01-08T00:00:00",
+        )
+        assert searched["events"] == []
+        assert "error" not in searched
+    finally:
+        _close(client)
+
+
+def test_revoke_token_blocks_agent(tmp_path: Path, monkeypatch) -> None:
+    client, _fake = _open(tmp_path, monkeypatch)
+    try:
+        from app.services.agent import create_token, revoke_token
+
+        public, plain = create_token(
+            client.app.state.engine,
+            name="temp",
+            scopes=["calendars:read", "calendars:write"],
+        )
+        assert isinstance(public, dict)
+        ok = client.get(
+            "/api/agent/v1/calendars",
+            headers={"Authorization": f"Bearer {plain}"},
+        )
+        assert ok.status_code == 200
+        revoked = revoke_token(client.app.state.engine, public["id"])
+        assert isinstance(revoked, dict)
+        denied = client.get(
+            "/api/agent/v1/calendars",
+            headers={"Authorization": f"Bearer {plain}"},
+        )
+        assert denied.status_code == 401
+        page = client.post(
+            f"/tokens/{public['id']}/revoke",
+            headers={"HX-Request": "true"},
+        )
+        assert page.status_code == 200
     finally:
         _close(client)
