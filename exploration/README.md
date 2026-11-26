@@ -10,12 +10,14 @@ Not product docs. Not a commitment. A place to decide and then build.
 3. [security.md](security.md) — auth and trust boundaries
 4. [decisions.md](decisions.md) — locked choices (D1–D9)
 
+The first three docs should match the locked decisions; when they disagree, fix the docs or reopen a decision.
+
 ## Constraint
 
 Target host: netcup **VPS nano G11.5s** — 2 vCPU, **2 GB RAM**, 60 GB SSD.
-Five Compose services already. Prefer zero new containers.
+Five Compose services already. Prefer zero new containers (D1: MCP in-process).
 
 ## Out of scope here
 
-caldav-mcp as the product surface (useful CalDAV client; not hub policy).
+caldav-mcp as the product surface (D8 — ignore for product path; useful CalDAV client elsewhere, not hub policy).
 Rewriting CalDAV as the only public API.
