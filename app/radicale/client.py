@@ -98,6 +98,9 @@ class RadicaleClient:
         return status in {200, 207}
 
     def count_events(self, path: str) -> int:
+        return len(self.list_event_hrefs(path))
+
+    def list_event_hrefs(self, path: str) -> list[str]:
         status, _headers, payload = self._call(
             "PROPFIND",
             path,
@@ -107,7 +110,7 @@ class RadicaleClient:
         if status not in {200, 207}:
             logger.error("radicale_error method=PROPFIND status=%s", status)
             raise RadicaleError("The calendar could not be saved.")
-        return _count_ics_hrefs(payload, path)
+        return _list_ics_hrefs(payload, path)
 
     def _lookup_etag(self, path: str) -> str | None:
         status, headers, _payload = self._call("GET", path, None)
@@ -231,7 +234,7 @@ def _event_count_body() -> bytes:
     return xml.encode("utf-8")
 
 
-def _count_ics_hrefs(payload: bytes, collection: str) -> int:
+def _list_ics_hrefs(payload: bytes, collection: str) -> list[str]:
     prefix = collection if collection.endswith("/") else f"{collection}/"
     found: set[str] = set()
     for raw in _HREF.findall(payload):
@@ -241,7 +244,7 @@ def _count_ics_hrefs(payload: bytes, collection: str) -> int:
             path = prefix + path.lstrip("/")
         if path.startswith(prefix) and path.lower().endswith(".ics"):
             found.add(path)
-    return len(found)
+    return sorted(found)
 
 
 def _propstat_failed(payload: bytes) -> bool:

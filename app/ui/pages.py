@@ -3,6 +3,12 @@
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse
 
+from app.services.agent import (
+    AgentError,
+    create_token,
+    list_tokens,
+    revoke_token,
+)
 from app.services.sources import (
     SourceFailure,
     create_source,
@@ -264,6 +270,103 @@ def calendars_page(request: Request) -> HTMLResponse:
             "calendars": list_sources(request.app.state.engine),
         },
     )
+
+
+@router.get("/tokens")
+def tokens_page(request: Request) -> HTMLResponse:
+    return _page(
+        request,
+        "tokens.html",
+        _tokens_context(
+            request,
+            error="",
+            plaintext="",
+            draft_name="",
+            draft_scopes=["calendars:read"],
+        ),
+    )
+
+
+@router.post("/tokens")
+async def tokens_create(request: Request) -> HTMLResponse:
+    form = await request.form()
+    name = str(form.get("name") or "")
+    scopes = [str(value) for value in form.getlist("scope")]
+    result = create_token(request.app.state.engine, name=name, scopes=scopes)
+    if isinstance(result, AgentError):
+        return _tokens_response(
+            request,
+            error=_sentence(request, result.detail),
+            plaintext="",
+            draft_name=name,
+            draft_scopes=scopes or ["calendars:read"],
+        )
+    public, plaintext = result
+    return _tokens_response(
+        request,
+        error="",
+        plaintext=plaintext,
+        draft_name="",
+        draft_scopes=["calendars:read"],
+        notice_token=public,
+    )
+
+
+@router.post("/tokens/{token_id}/revoke")
+def tokens_revoke(request: Request, token_id: str) -> HTMLResponse:
+    result = revoke_token(request.app.state.engine, token_id)
+    error = ""
+    if isinstance(result, AgentError):
+        error = _sentence(request, result.detail)
+    return _tokens_response(
+        request,
+        error=error,
+        plaintext="",
+        draft_name="",
+        draft_scopes=["calendars:read"],
+    )
+
+
+def _tokens_context(
+    request: Request,
+    *,
+    error: str,
+    plaintext: str,
+    draft_name: str,
+    draft_scopes: list[str],
+    notice_token: dict | None = None,
+) -> dict:
+    _ = notice_token
+    return {
+        "title": _t(request)("nav.tokens"),
+        "tokens": list_tokens(request.app.state.engine),
+        "error": error,
+        "plaintext": plaintext,
+        "draft_name": draft_name,
+        "draft_scopes": draft_scopes,
+    }
+
+
+def _tokens_response(
+    request: Request,
+    *,
+    error: str,
+    plaintext: str,
+    draft_name: str,
+    draft_scopes: list[str],
+    notice_token: dict | None = None,
+) -> HTMLResponse:
+    context = _tokens_context(
+        request,
+        error=error,
+        plaintext=plaintext,
+        draft_name=draft_name,
+        draft_scopes=draft_scopes,
+        notice_token=notice_token,
+    )
+    if request.headers.get("hx-request", "").strip():
+        return _render(request, "tokens_panel.html", context)
+    return _page(request, "tokens.html", context)
 
 
 @router.get("/health")

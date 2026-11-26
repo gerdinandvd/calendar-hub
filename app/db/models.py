@@ -73,3 +73,17 @@ class SyncState(Base):
     events_seen: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     events_upserted: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     events_deleted: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+
+class AgentToken(Base):
+    """Scoped bearer PAT for the agent HTTP API and MCP."""
+
+    __tablename__ = "agent_tokens"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    name: Mapped[str] = mapped_column(String, nullable=False)
+    token_hash: Mapped[str] = mapped_column(String, nullable=False, unique=True)
+    token_prefix: Mapped[str] = mapped_column(String, nullable=False)
+    scopes: Mapped[str] = mapped_column(String, nullable=False)
+    created_at: Mapped[str] = mapped_column(String, nullable=False)
+    revoked_at: Mapped[str | None] = mapped_column(String, nullable=True)

@@ -62,7 +62,7 @@ def _render(request: Request, name: str, context: dict) -> HTMLResponse:
 def _section(path: str) -> str:
     if path == "/":
         return "home"
-    for name in ("sources", "calendars", "sync", "health"):
+    for name in ("sources", "calendars", "sync", "tokens", "health"):
         if path == f"/{name}" or path.startswith(f"/{name}/"):
             return name
     return ""

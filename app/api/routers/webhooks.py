@@ -1,15 +1,13 @@
 """Incoming webhooks."""
 
 import json
-import threading
-import time
-from collections import deque
 
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 
 from app.access import json_error
 from app.i18n import english
+from app.services.rate_limit import RateLimiter
 from app.services.sources import get_source
 from app.services.sources.types import (
     WebhookApplyError,
@@ -24,27 +22,6 @@ from app.services.sources.webhook import (
 router = APIRouter()
 
 MAX_BODY = 256 * 1024
-_LIMIT = 60
-_WINDOW_SECONDS = 60.0
-
-
-class RateLimiter:
-    """Sixty requests per minute for one source, in this process."""
-
-    def __init__(self, limit: int = _LIMIT, window: float = _WINDOW_SECONDS) -> None:
-        self.limit = limit
-        self.window = window
-        self._hits: dict[str, deque[float]] = {}
-        self._lock = threading.Lock()
-
-    def allow(self, key: str, now: float | None = None) -> bool:
-        moment = time.monotonic() if now is None else now
-        with self._lock:
-            hits = self._hits.setdefault(key, deque())
-            while hits and moment - hits[0] >= self.window:
-                hits.popleft()
-            hits.append(moment)
-            return len(hits) <= self.limit
 
 
 @router.post("/api/webhooks/{source_id}", response_model=None)
