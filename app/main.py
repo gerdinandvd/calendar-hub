@@ -13,7 +13,6 @@ from app.api.routers.health import router as health_router
 from app.api.routers.sources import router as sources_router
 from app.api.routers.sync import router as sync_router
 from app.api.routers.webhooks import router as webhooks_router
-from app.services.rate_limit import RateLimiter
 from app.db.models import Base
 from app.db.session import make_engine
 from app.health import Heartbeat
@@ -24,6 +23,7 @@ from app.mcp.server import build_mcp_app
 from app.mcp.server import mcp as mcp_server
 from app.radicale.client import RadicaleClient
 from app.services.agent import ConfirmStore
+from app.services.rate_limit import RateLimiter
 from app.services.sources.sync_ops import (
     ensure_sync_states,
     migrate_ics_collection_paths,
