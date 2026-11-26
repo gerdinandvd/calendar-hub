@@ -40,33 +40,11 @@ Status: **open** until checked. Pick before coding that slice.
 
 **Chosen: B.** Destructive deletes need an explicit confirm step (token/flag), tuned for AX — clear preview of what will be deleted, short-lived token, no mystery second call. Soft-delete deferred unless undo proves necessary.
 
-## D6 — Calendar access for agents
+## D6 — Which calendars agents see by default
 
-**About:** which hub calendars a Bearer token may touch via Agent HTTP / MCP — not Admin UI, not CalDAV, not webhook secrets.
-
-Two axes (pick a combo; do not conflate):
-
-| Axis | Question |
-|------|----------|
-| **Visibility (read)** | Which calendars appear in `list_calendars` and can supply events to list/search/get? |
-| **Mutation (write)** | On which of those may create / update / delete run? |
-
-Kinds today: `private`, `webhook`, `ics`. Architecture already says **ics is never writable** (mirror); that stays true under every option below.
-
-Also distinct from D7 (token *scopes* like `calendars:read` / `calendars:write`). D6 is *which calendars*; D7 is *whether the token may read/write at all*.
-
-### Options
-
-- [ ] **A** Hub-wide: all kinds readable; write = private + webhook (architecture table as product default; no per-token calendar filter)
-- [ ] **B** Hub-wide: all kinds readable; write = private only (webhook stays webhook-POST-only; agents never mutate webhook calendars)
-- [ ] **C** Hub-wide: private only (read + write). ICS and webhook calendars invisible to agents
-- [ ] **D** Per-token allowlist (explicit calendar ids). New token starts empty or with a chosen default set; admin picks which calendars that token sees. Write still respects kind rules (no ics write)
-- [ ] **E** Kind defaults + optional per-token allowlist. Default = A or B; a token may further shrink (never enlarge past hub policy)
-- [ ] **F** Separate read allowlist and write allowlist per token (finest control; more admin UI)
-
-**“By default”** means: when the client does not pass `calendars=` on list/search, and when a new token is created without a custom set — which calendars are in scope.
-
-Not decided yet.
+- [ ] **A** All
+- [ ] **B** Allowlist per token
+- [ ] **C** All readable; write only private (+ webhook?) 
 
 ## D7 — Auth phase 1
 

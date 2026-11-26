@@ -44,10 +44,6 @@ Caddy: agent routes outside basic auth; Bearer checked in app (like webhooks).
 
 ## Calendar kinds
 
-Hard rule: **ics is never agent-writable** (mirror). Read/write *which* kinds agents see is open — see **D6**.
-
-Sketch if D6 picks the wide default (option A):
-
 | Kind | Agent read | Agent write |
 |------|------------|-------------|
 | private | yes | yes |
