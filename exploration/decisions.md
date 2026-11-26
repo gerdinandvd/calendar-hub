@@ -42,9 +42,11 @@ Status: **open** until checked. Pick before coding that slice.
 
 ## D6 — Which calendars agents see by default
 
-- [ ] **A** All
+- [x] **A** All
 - [ ] **B** Allowlist per token
 - [ ] **C** All readable; write only private (+ webhook?) 
+
+**Chosen: A.** Owner-parity on events: agents see every calendar the hub has; write where the kind allows (private + webhook; ics stays read-only mirror). No per-token calendar allowlist in v1. Later we may add more rights (e.g. create calendars / sources) — that is control-plane, not this default.
 
 ## D7 — Auth phase 1
 
