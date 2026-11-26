@@ -45,11 +45,19 @@ Caddy: agent routes outside basic auth; Bearer checked in app (like webhooks).
 
 ## Identifiers
 
-Agents see **hub opaque ids** from a mapping table (D4), stable across list → get → update/delete. CalDAV uid/href stay behind the mapping. Revisit SQLite/RAM cost on the 2 GB host with other sizing tradeoffs later.
+Agents see **hub opaque ids** from `EventMapping` (D4), stable across list → get → update/delete. CalDAV uid/href stay behind the mapping.
+
+- Hub creates (agent / webhook / ICS) **always** mint a mapping.
+- CalDAV clients write Radicale directly → no row until agent **list/get lazy-backfills** (D11).
+- Revisit SQLite/RAM cost on the 2 GB host with other sizing tradeoffs later.
+
+## Recurrence
+
+Radicale stores series as one object (master + exceptions). Agent **list/search expand** instances into the query window; **get/update/delete** target the series master only in v1 (D13).
 
 ## Calendar kinds
 
-Agents see **all** calendars (owner event parity; no per-token allowlist in v1 — D6). Write follows kind:
+Agents see **all enabled** calendars (D6, D14). Disabled sources are hidden. Write follows kind:
 
 | Kind | Agent read | Agent write |
 |------|------------|-------------|

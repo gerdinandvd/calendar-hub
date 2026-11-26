@@ -1,6 +1,7 @@
 # Decisions
 
-Status: **D1–D10 decided.** Build order and API contract details left open until the idea is further shaped.
+Status: **D1–D14 decided.** Build order left open until the idea is further shaped.
+Contract field shapes / caps live in [surface.md](surface.md) and follow these decisions.
 
 ## D1 — MCP hosting
 
@@ -35,18 +36,18 @@ Status: **D1–D10 decided.** Build order and API contract details left open unt
 ## D5 — Delete semantics
 
 - [ ] **A** Hard delete immediately
-- [x] **B** Confirm flag required
+- [x] **B** Confirm required (preview + short-lived token)
 - [ ] **C** Soft-delete / grace
 
-**Chosen: B.** Destructive deletes need an explicit confirm step (token/flag), tuned for AX — clear preview of what will be deleted, short-lived token, no mystery second call. Soft-delete deferred unless undo proves necessary.
+**Chosen: B.** One delete tool/route, two steps: first call returns preview + `confirm_token` (~120s, single-use, bound to id); second call with token commits. No bare `confirm=true`. Soft-delete deferred unless undo proves necessary.
 
 ## D6 — Which calendars agents see by default
 
-- [x] **A** All
+- [x] **A** All (enabled)
 - [ ] **B** Allowlist per token
-- [ ] **C** All readable; write only private (+ webhook?) 
+- [ ] **C** All readable; write only private (+ webhook?)
 
-**Chosen: A.** Owner-parity on events: agents see every calendar the hub has; write where the kind allows (private + webhook; ics stays read-only mirror). No per-token calendar allowlist in v1. Later we may add more rights (e.g. create calendars / sources) — that is control-plane, not this default.
+**Chosen: A.** Owner-parity on events: agents see every **enabled** calendar the hub has (D14); write where the kind allows (private + webhook; ics stays read-only mirror). No per-token calendar allowlist in v1. Later we may add more rights (e.g. create calendars / sources) — that is control-plane, not this default.
 
 ## D7 — Auth phase 1
 
@@ -78,3 +79,35 @@ Status: **D1–D10 decided.** Build order and API contract details left open unt
 - [ ] **C** FastAPI-MCP (`fastapi-mcp` auto-bridge)
 
 **Chosen: A.** Mount Streamable HTTP in-process via `mcp.streamable_http_app()` (D1). Thin adapter over Agent HTTP with hand-written tools (D2 intents). FastMCP deferred — useful later for IdP/OAuth helpers, not required for PAT phase (D7) or resource-server OAuth later. FastAPI-MCP rejected: auto-exposing routes fights distinct MCP tool contracts.
+
+## D11 — Mapping coverage (CalDAV bypass)
+
+- [x] **A** Hub writes always map + lazy backfill on list/get for unmapped Radicale objects
+- [ ] **B** Only events that already have a mapping (agent/webhook/ICS)
+- [ ] **C** Eager full backfill job
+
+**Chosen: A.** Every create through the hub mints an `EventMapping`. CalDAV clients (phone, Thunderbird, …) write Radicale directly, so list/get **lazy-fills** missing rows (stable hub id; CalDAV uid stays internal). Needed for D4 + D6 owner parity. Not caldav-mcp-specific — any CalDAV bypass.
+
+## D12 — Search without time window
+
+- [ ] **A** Refuse until `from`/`to` are set
+- [x] **B** Allow; hard result cap + pagination; no silent week default
+- [ ] **C** Allow with a silent default window (echoed)
+
+**Chosen: B.** `search_events` requires `q`; window optional. No list-style week default. Cap + opaque cursor keep scans bounded on the 2 GB host.
+
+## D13 — Recurring events in list/search
+
+- [ ] **A** Expand occurrences in list/search; occurrence-scoped writes in v1
+- [ ] **B** Masters only (no expansion)
+- [x] **C** Expand in list/search; writes (get/update/delete) target the **series master** only in v1
+
+**Chosen: C.** Agents see concrete instances in a window (“what’s this week?”). Mutations use the hub id of the series; occurrence edit/`scope` later. May revisit toward masters-only (B) if expansion cost or AX noise hurts.
+
+## D14 — Disabled sources
+
+- [x] **A** Hide from agents (`enabled=0` invisible)
+- [ ] **B** Show read-only
+- [ ] **C** Show with same write rules as enabled
+
+**Chosen: A.** Agents only see enabled calendars. Turning a source off removes it from agent list/read/write until re-enabled.
