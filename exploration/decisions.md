@@ -66,8 +66,10 @@ Status: **open** until checked. Pick before coding that slice.
 ## D9 — Free/busy tool
 
 - [ ] **A** v1
-- [ ] **B** later
+- [x] **B** later
 - [ ] **C** never (use list + agent reason)
+
+**Chosen: B.** Ship list/search/get/write + MCP first; add `find_free_slots` / free-busy if agents keep misusing list for scheduling gaps.
 
 ## D10 — Ship order
 
