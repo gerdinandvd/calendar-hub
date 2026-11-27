@@ -106,18 +106,65 @@ def merge_patch(
         "status": master.status,
         "rrule": master.rrule,
     }
+    error = _apply_patch_fields(data, payload, master, source_timezone)
+    if error is not None:
+        return error
+    if data["end_value"] is not None:
+        order = _order_ok(data["start_value"], data["end_value"], data["all_day"])
+        if isinstance(order, AgentError):
+            return order
+    stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+    return replace(
+        master,
+        summary=data["summary"],
+        description=data["description"],
+        location=data["location"],
+        status=data["status"],
+        start_value=data["start_value"],
+        end_value=data["end_value"],
+        all_day=data["all_day"],
+        timezone=None if data["all_day"] else data["timezone"],
+        rrule=data["rrule"],
+        dtstamp=stamp,
+        recurrence_id=None,
+    )
+
+
+def _apply_patch_fields(
+    data: dict,
+    payload: dict,
+    master: CalendarEvent,
+    source_timezone: str,
+) -> AgentError | None:
+    error = _patch_text_fields(data, payload)
+    if error is not None:
+        return error
+    error = _patch_timing(data, payload, master)
+    if error is not None:
+        return error
+    return _patch_meta(data, payload, source_timezone)
+
+
+def _patch_text_fields(data: dict, payload: dict) -> AgentError | None:
     if "summary" in payload:
         if payload["summary"] is None or not isinstance(payload["summary"], str):
             return invalid("Enter a summary.")
         data["summary"] = payload["summary"]
     for key in ("description", "location"):
-        if key in payload:
-            if payload[key] is None:
-                data[key] = ""
-            elif isinstance(payload[key], str):
-                data[key] = payload[key].replace("\r\n", "\n").replace("\r", "\n")
-            else:
-                return invalid("The input is invalid.")
+        if key not in payload:
+            continue
+        if payload[key] is None:
+            data[key] = ""
+        elif isinstance(payload[key], str):
+            data[key] = payload[key].replace("\r\n", "\n").replace("\r", "\n")
+        else:
+            return invalid("The input is invalid.")
+    return None
+
+
+def _patch_timing(
+    data: dict, payload: dict, master: CalendarEvent
+) -> AgentError | None:
     if "all_day" in payload:
         if not isinstance(payload["all_day"], bool):
             return invalid("The input is invalid.")
@@ -151,6 +198,10 @@ def merge_patch(
             data["end_value"] = end_value
         else:
             return invalid("Enter an end.")
+    return None
+
+
+def _patch_meta(data: dict, payload: dict, source_timezone: str) -> AgentError | None:
     if "timezone" in payload:
         if payload["timezone"] is None:
             data["timezone"] = source_timezone
@@ -170,25 +221,7 @@ def merge_patch(
         if isinstance(rrule, AgentError):
             return rrule
         data["rrule"] = rrule
-    if data["end_value"] is not None:
-        order = _order_ok(data["start_value"], data["end_value"], data["all_day"])
-        if isinstance(order, AgentError):
-            return order
-    stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
-    return replace(
-        master,
-        summary=data["summary"],
-        description=data["description"],
-        location=data["location"],
-        status=data["status"],
-        start_value=data["start_value"],
-        end_value=data["end_value"],
-        all_day=data["all_day"],
-        timezone=None if data["all_day"] else data["timezone"],
-        rrule=data["rrule"],
-        dtstamp=stamp,
-        recurrence_id=None,
-    )
+    return None
 
 
 def to_calendar_event(parsed: dict, uid: str) -> CalendarEvent:
