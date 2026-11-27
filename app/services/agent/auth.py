@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import hashlib
-import hmac
 import secrets
 import uuid
+from contextvars import ContextVar, Token
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 from sqlalchemy import select
 from sqlalchemy.engine import Engine
@@ -18,12 +19,20 @@ from app.services.agent.types import (
     SCOPE_WRITE,
     VALID_SCOPES,
     AgentError,
+    forbidden,
     invalid,
+    rate_limited,
 )
 from app.sync.apply import utc_now
 
+if TYPE_CHECKING:
+    from app.services.rate_limit import RateLimiter
+
 _TOKEN_BYTES = 32
 _PREFIX_LEN = 8
+_current_token: ContextVar[VerifiedToken | None] = ContextVar(
+    "agent_verified_token", default=None
+)
 
 
 @dataclass(frozen=True)
@@ -109,8 +118,50 @@ def verify_bearer(
 
 def require_scope(token: VerifiedToken, scope: str) -> AgentError | None:
     if scope not in token.scopes:
-        return AgentError(403, "forbidden", "Missing required scope.")
+        return forbidden()
     return None
+
+
+def authenticate_agent(
+    engine: Engine,
+    authorization: str | None,
+    rates: RateLimiter,
+    *,
+    write: bool = False,
+) -> VerifiedToken | AgentError:
+    verified = verify_bearer(engine, authorization)
+    if isinstance(verified, AgentError):
+        return verified
+    if not rates.allow(verified.id):
+        return rate_limited()
+    if write:
+        missing = require_scope(verified, SCOPE_WRITE)
+    elif SCOPE_READ in verified.scopes or SCOPE_WRITE in verified.scopes:
+        missing = None
+    else:
+        missing = require_scope(verified, SCOPE_READ)
+    if missing is not None:
+        return missing
+    return verified
+
+
+def bind_current_token(token: VerifiedToken) -> Token:
+    return _current_token.set(token)
+
+
+def reset_current_token(handle: Token) -> None:
+    _current_token.reset(handle)
+
+
+def current_token() -> VerifiedToken | None:
+    return _current_token.get()
+
+
+def require_current_write() -> AgentError | None:
+    token = _current_token.get()
+    if token is None:
+        return forbidden()
+    return require_scope(token, SCOPE_WRITE)
 
 
 def _normalize_scopes(scopes: list[str]) -> frozenset[str] | AgentError:
@@ -137,7 +188,3 @@ def _public(row: AgentToken) -> dict:
         "created_at": row.created_at,
         "revoked_at": row.revoked_at,
     }
-
-
-def constant_time_equal(left: str, right: str) -> bool:
-    return hmac.compare_digest(left.encode("utf-8"), right.encode("utf-8"))

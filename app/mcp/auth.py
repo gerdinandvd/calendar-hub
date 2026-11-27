@@ -7,7 +7,12 @@ from typing import Any
 
 from starlette.types import ASGIApp, Receive, Scope, Send
 
-from app.services.agent import SCOPE_READ, SCOPE_WRITE, AgentError, verify_bearer
+from app.services.agent.auth import (
+    authenticate_agent,
+    bind_current_token,
+    reset_current_token,
+)
+from app.services.agent.types import AgentError
 from app.services.rate_limit import RateLimiter
 
 
@@ -31,19 +36,19 @@ class AgentBearerMiddleware:
             name.decode("latin-1").lower(): value.decode("latin-1")
             for name, value in scope.get("headers", [])
         }
-        verified = verify_bearer(self.engine, headers.get("authorization"))
+        verified = authenticate_agent(
+            self.engine, headers.get("authorization"), self.rates, write=False
+        )
         if isinstance(verified, AgentError):
             await _json(send, verified.status, verified.error, verified.detail)
             return
-        if SCOPE_READ not in verified.scopes and SCOPE_WRITE not in verified.scopes:
-            await _json(send, 403, "forbidden", "Missing required scope.")
-            return
-        if not self.rates.allow(verified.id):
-            await _json(send, 429, "rate_limited", "Too many requests for this token.")
-            return
         scope.setdefault("state", {})
         scope["state"]["agent_token"] = verified
-        await self.app(scope, receive, send)
+        handle = bind_current_token(verified)
+        try:
+            await self.app(scope, receive, send)
+        finally:
+            reset_current_token(handle)
 
 
 async def _json(send: Send, status: int, error: str, detail: str) -> None:

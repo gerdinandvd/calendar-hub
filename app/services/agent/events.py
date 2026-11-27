@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+import logging
 import uuid
 from datetime import UTC, datetime
 from typing import Any
@@ -11,11 +13,11 @@ from sqlalchemy.orm import Session
 
 from app.db.models import EventMapping, Source
 from app.radicale.client import RadicaleClient, RadicaleError
+from app.services.agent.auth import current_token
 from app.services.agent.calendars import load_enabled_sources
 from app.services.agent.confirm import ConfirmStore
 from app.services.agent.expand import master_for_response
 from app.services.agent.payload import (
-    PATCH_KEYS,
     merge_patch,
     parse_create,
     timezone_ok,
@@ -34,6 +36,7 @@ from app.services.agent.types import (
     DEFAULT_LIMIT,
     FIELD_COMPACT,
     MAX_LIMIT,
+    MAX_RESPONSE_BYTES,
     VALID_FIELDS,
     WRITABLE_KINDS,
     AgentError,
@@ -55,8 +58,10 @@ from app.sync.apply import (
     remember_delete,
     utc_now,
 )
-from app.sync.ical import build_vcalendar, parse_vcalendar
-from app.sync.ical_types import CalendarParseError
+from app.sync.ical import build_object, build_vcalendar, parse_vcalendar
+from app.sync.ical_types import CalendarObject, CalendarParseError
+
+logger = logging.getLogger("app")
 
 
 def list_or_search_events(
@@ -84,10 +89,11 @@ def list_or_search_events(
     if mode == "search":
         if not query:
             return invalid("q is required for search.")
-        window, window_error = resolve_search_window(window_from, window_to)
+        window, window_error, applied = resolve_search_window(window_from, window_to)
         if window_error is not None:
             return window_error
-        start, end = window if window is not None else (None, None)
+        assert window is not None
+        start, end = window
     else:
         window, window_error, applied = resolve_list_window(window_from, window_to)
         if window_error is not None:
@@ -130,14 +136,12 @@ def list_or_search_events(
     start_at = 0 if offset is None else offset
     slice_rows = rows[start_at : start_at + capped]
     next_cursor = None
-    if start_at + capped < len(rows):
+    truncated = len(rows) > start_at + capped
+    if truncated:
         next_cursor = encode_cursor(start_at + capped)
 
-    echo_window = None
-    if start is not None and end is not None:
-        echo_window = {"from": iso_out(start), "to": iso_out(end)}
-
-    return {
+    echo_window = {"from": iso_out(start), "to": iso_out(end)}
+    body = {
         "events": slice_rows,
         "window": echo_window,
         "q": query or None,
@@ -148,9 +152,10 @@ def list_or_search_events(
             "cursor": cursor,
             "next_cursor": next_cursor,
             "count": len(slice_rows),
-            "truncated": len(rows) > start_at + capped,
+            "truncated": truncated,
         },
     }
+    return _fit_response(body, start_at, capped, rows)
 
 
 def get_event(
@@ -215,6 +220,7 @@ def create_event(
             when,
             mapping_id=mapping_id,
         )
+    _audit("create", source["id"])
     return get_event(engine, radicale, mapping_id, fields=FIELD_COMPACT)
 
 
@@ -222,8 +228,6 @@ def update_event(
     engine: Engine, radicale: RadicaleClient, event_id: str, payload: object
 ) -> dict | AgentError:
     if not isinstance(payload, dict):
-        return invalid("The input is invalid.")
-    if set(payload) - PATCH_KEYS:
         return invalid("The input is invalid.")
     loaded = _load_live(engine, radicale, event_id)
     if isinstance(loaded, AgentError):
@@ -235,7 +239,12 @@ def update_event(
     merged = merge_patch(master, payload, source["timezone"])
     if isinstance(merged, AgentError):
         return merged
-    body = build_vcalendar(merged).encode("utf-8")
+    updated = CalendarObject(
+        uid=obj.uid,
+        version=obj.version,
+        components=(merged, *obj.components[1:]),
+    )
+    body = build_object(updated).encode("utf-8")
     path = event_path(source["collection_path"], mapping.ical_uid)
     try:
         put_event(radicale, path, body, fresh=False)
@@ -248,6 +257,7 @@ def update_event(
             row.external_version = when
             row.last_synced_at = when
             row.deleted_at = None
+    _audit("update", source["id"])
     return get_event(engine, radicale, mapping.id, fields=FIELD_COMPACT)
 
 
@@ -292,6 +302,7 @@ def delete_event_flow(
         row = load_mapping_by_id(session, mapping.id)
         if row is not None:
             remember_delete(row, when)
+    _audit("delete", source["id"])
     return {"ok": True, "id": mapping.id}
 
 
@@ -350,3 +361,38 @@ def _writable_source(engine: Engine, calendar_id: str) -> dict | AgentError:
             "timezone": row.timezone,
             "collection_path": row.collection_path,
         }
+
+
+def _audit(action: str, calendar_id: str) -> None:
+    token = current_token()
+    token_id = token.id if token is not None else "-"
+    logger.info(
+        "agent_audit token_id=%s action=%s calendar=%s at=%s",
+        token_id,
+        action,
+        calendar_id,
+        utc_now(),
+    )
+
+
+def _fit_response(
+    body: dict[str, Any], start_at: int, capped: int, rows: list[dict]
+) -> dict[str, Any]:
+    encoded = json.dumps(body, ensure_ascii=False).encode("utf-8")
+    if len(encoded) <= MAX_RESPONSE_BYTES:
+        return body
+    events = list(body["events"])
+    while events and len(encoded) > MAX_RESPONSE_BYTES:
+        events.pop()
+        body = {
+            **body,
+            "events": events,
+            "pagination": {
+                **body["pagination"],
+                "count": len(events),
+                "truncated": True,
+                "next_cursor": encode_cursor(start_at + len(events)),
+            },
+        }
+        encoded = json.dumps(body, ensure_ascii=False).encode("utf-8")
+    return body

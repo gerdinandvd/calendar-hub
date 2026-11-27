@@ -16,6 +16,8 @@ from app.services.agent import (
     list_or_search_events,
     update_event,
 )
+from app.services.agent.auth import VerifiedToken
+from app.services.agent.idempotency import IdempotencyStore
 from app.services.agent.types import MAX_BODY
 
 router = APIRouter(prefix="/api/agent/v1")
@@ -84,12 +86,27 @@ async def post_event(request: Request) -> dict | JSONResponse:
     auth = require_agent(request, write=True)
     if isinstance(auth, JSONResponse):
         return auth
+    assert isinstance(auth, VerifiedToken)
     payload = await _json_body(request)
     if isinstance(payload, JSONResponse):
         return payload
-    return _result(
-        create_event(request.app.state.engine, request.app.state.radicale, payload)
-    )
+    idem_key = (request.headers.get("idempotency-key") or "").strip()
+    store: IdempotencyStore = request.app.state.agent_idempotency
+    if idem_key:
+        existing = store.lookup(auth.id, idem_key)
+        if existing is not None:
+            return _result(
+                get_event(
+                    request.app.state.engine,
+                    request.app.state.radicale,
+                    existing,
+                    fields="compact",
+                )
+            )
+    result = create_event(request.app.state.engine, request.app.state.radicale, payload)
+    if idem_key and isinstance(result, dict) and isinstance(result.get("id"), str):
+        store.remember(auth.id, idem_key, result["id"])
+    return _result(result)
 
 
 @router.patch("/events/{event_id}", response_model=None)
