@@ -12,13 +12,15 @@ MAX_LIMIT = 200
 MAX_WINDOW_DAYS = 366
 CONFIRM_TTL_SECONDS = 120
 MAX_BODY = 256 * 1024
+MAX_RESPONSE_BYTES = 1024 * 1024
 DEFAULT_LIST_DAYS = 7
 DESCRIPTION_COMPACT_LEN = 280
+SUMMARY_MAX_LEN = 512
+TEXT_MAX_LEN = 8192
 
 FIELD_COMPACT = "compact"
 FIELD_STANDARD = "standard"
-FIELD_FULL = "full"
-VALID_FIELDS = frozenset({FIELD_COMPACT, FIELD_STANDARD, FIELD_FULL})
+VALID_FIELDS = frozenset({FIELD_COMPACT, FIELD_STANDARD})
 
 
 @dataclass(frozen=True)
@@ -26,10 +28,6 @@ class AgentError:
     status: int
     error: str
     detail: str
-
-
-def unauthorized(detail: str = "Authentication required.") -> AgentError:
-    return AgentError(401, "unauthorized", detail)
 
 
 def forbidden(detail: str = "Missing required scope.") -> AgentError:

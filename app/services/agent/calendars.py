@@ -49,6 +49,5 @@ def _row(source: Source) -> dict:
         "name": source.name,
         "kind": source.kind,
         "timezone": source.timezone,
-        "color": source.color,
         "writable": source.kind in WRITABLE_KINDS,
     }

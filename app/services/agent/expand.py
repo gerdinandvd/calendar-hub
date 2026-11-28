@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
-from datetime import date, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from dateutil.rrule import rrulestr
@@ -115,10 +115,6 @@ def expand_object(
     return found
 
 
-def master_for_response(obj: CalendarObject) -> CalendarEvent:
-    return obj.components[0]
-
-
 def _rules(event: CalendarEvent) -> list[str]:
     rules: list[str] = []
     if event.rrule:
@@ -134,22 +130,38 @@ def _occurrence_starts(
     window_end: datetime,
 ) -> list[datetime | date]:
     dtstart = _to_moment(master.start_value, master.all_day, master.timezone)
+    if (
+        master.all_day
+        and isinstance(dtstart, date)
+        and not isinstance(dtstart, datetime)
+    ):
+        # dateutil emits naive datetimes from a date dtstart; use UTC midnight so
+        # window comparisons stay offset-aware.
+        dtstart = datetime(dtstart.year, dtstart.month, dtstart.day, tzinfo=UTC)
     if not rules:
         return [dtstart]
     moments: list[datetime | date] = []
+    bound_start = _as_datetime(window_start)
+    bound_end = _as_datetime(window_end)
     for rule in rules:
         text = rule if rule.upper().startswith("RRULE:") else f"RRULE:{rule}"
         try:
             parsed = rrulestr(text, dtstart=dtstart)
         except (ValueError, TypeError):
             continue
-        for moment in parsed.between(window_start, window_end, inc=True):
-            moments.append(moment)
-            if len(moments) >= _MAX_OCCURRENCES:
-                return moments
+        try:
+            for moment in parsed.xafter(bound_start, inc=True):
+                aware = _as_datetime(moment)
+                if aware > bound_end:
+                    break
+                moments.append(moment)
+                if len(moments) >= _MAX_OCCURRENCES:
+                    return moments
+        except TypeError:
+            continue
     for mark in master.rdates:
         moment = _to_moment(mark.value, mark.all_day, mark.timezone or master.timezone)
-        if window_start <= _as_datetime(moment) <= window_end:
+        if bound_start <= _as_datetime(moment) <= bound_end:
             moments.append(moment)
     return moments
 
@@ -194,9 +206,9 @@ def _to_moment(value: str, all_day: bool, timezone: str | None) -> datetime | da
 def _as_datetime(moment: datetime | date) -> datetime:
     if isinstance(moment, datetime):
         if moment.tzinfo is None:
-            return moment.replace(tzinfo=ZoneInfo("UTC"))
+            return moment.replace(tzinfo=UTC)
         return moment
-    return datetime(moment.year, moment.month, moment.day, tzinfo=ZoneInfo("UTC"))
+    return datetime(moment.year, moment.month, moment.day, tzinfo=UTC)
 
 
 def _compact(moment: datetime | date, all_day: bool) -> str:
@@ -205,7 +217,7 @@ def _compact(moment: datetime | date, all_day: bool) -> str:
             moment = moment.date()
         return f"{moment.year:04}{moment.month:02}{moment.day:02}"
     if isinstance(moment, date) and not isinstance(moment, datetime):
-        moment = datetime(moment.year, moment.month, moment.day, tzinfo=ZoneInfo("UTC"))
+        moment = datetime(moment.year, moment.month, moment.day, tzinfo=UTC)
     return (
         f"{moment.year:04}{moment.month:02}{moment.day:02}"
         f"T{moment.hour:02}{moment.minute:02}{moment.second:02}"

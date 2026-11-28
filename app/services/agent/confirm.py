@@ -39,12 +39,13 @@ class ConfirmStore:
         now = time.monotonic()
         with self._lock:
             self._purge_locked(now)
-            record = self._items.pop(token, None)
-        if record is None:
-            return None
-        if record.event_id != event_id:
-            return None
-        return record
+            record = self._items.get(token)
+            if record is None:
+                return None
+            if record.event_id != event_id:
+                return None
+            del self._items[token]
+            return record
 
     def _purge_locked(self, now: float) -> None:
         expired = [key for key, row in self._items.items() if row.expires_at <= now]

@@ -2,7 +2,6 @@
 
 from dataclasses import dataclass
 from urllib.parse import urlsplit
-from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from app.services.sources.types import (
     CREATABLE_KINDS,
@@ -12,6 +11,7 @@ from app.services.sources.types import (
     _failure,
     _field,
 )
+from app.sync.time_values import timezone_ok
 
 
 @dataclass(frozen=True)
@@ -51,7 +51,7 @@ def _validate_new(
     if not name.strip():
         fields["name"] = "sentence.enter_name"
     zone = DEFAULT_TIMEZONE if timezone_name is None else timezone_name.strip()
-    if not _timezone_ok(zone):
+    if not timezone_ok(zone):
         fields["timezone"] = "sentence.timezone"
     if enabled is not None and enabled not in (0, 1):
         return _failure(422, "sentence.enabled", fields)
@@ -68,23 +68,13 @@ def _validate_change(
     fields: dict[str, str] = {}
     if name is not None and not name.strip():
         fields["name"] = "sentence.enter_name"
-    if timezone_name is not None and not _timezone_ok(timezone_name.strip()):
+    if timezone_name is not None and not timezone_ok(timezone_name.strip()):
         fields["timezone"] = "sentence.timezone"
     if enabled is not None and enabled not in (0, 1):
         return _failure(422, "sentence.enabled", fields)
     if fields:
         return _failure(422, " ".join(fields.values()), fields)
     return None
-
-
-def _timezone_ok(value: str) -> bool:
-    if not value:
-        return False
-    try:
-        ZoneInfo(value)
-    except (ZoneInfoNotFoundError, ValueError):
-        return False
-    return True
 
 
 def _prepare_ics(

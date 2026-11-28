@@ -1,6 +1,6 @@
 """Control-plane tables. Events stay in Radicale, not in SQLite."""
 
-from sqlalchemy import Integer, String, UniqueConstraint
+from sqlalchemy import Index, Integer, String, UniqueConstraint
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -47,6 +47,7 @@ class EventMapping(Base):
     __tablename__ = "event_mappings"
     __table_args__ = (
         UniqueConstraint("source_id", "external_id", name="uq_mapping_source_external"),
+        Index("ix_event_mappings_source_ical_uid", "source_id", "ical_uid"),
     )
 
     id: Mapped[str] = mapped_column(String, primary_key=True)

@@ -23,6 +23,7 @@ from app.mcp.server import build_mcp_app
 from app.mcp.server import mcp as mcp_server
 from app.radicale.client import RadicaleClient
 from app.services.agent import ConfirmStore
+from app.services.agent.query import ensure_mapping_uid_index
 from app.services.rate_limit import RateLimiter
 from app.services.sources.sync_ops import (
     ensure_sync_states,
@@ -66,6 +67,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         with engine.connect() as connection:
             connection.exec_driver_sql("SELECT 1")
         Base.metadata.create_all(engine)
+        ensure_mapping_uid_index(engine)
         ensure_sync_states(engine)
         migrate_ics_collection_paths(engine, app.state.radicale)
         app.state.webhook_rates = RateLimiter()

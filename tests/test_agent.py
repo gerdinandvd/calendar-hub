@@ -364,12 +364,13 @@ def test_agent_patch_search_fields_and_confirm(tmp_path: Path, monkeypatch) -> N
             calendars=None,
             limit=10,
             cursor=None,
-            fields="full",
+            fields="standard",
         )
         assert isinstance(searched, dict)
         assert searched["q"] == "Beta"
-        assert searched["fields"] == "full"
+        assert searched["fields"] == "standard"
         assert searched["events"]
+        assert "rrule" in searched["events"][0]
 
         bad = client.delete(
             f"/api/agent/v1/events/{event_id}",
@@ -410,46 +411,293 @@ def test_expand_weekly_occurrences() -> None:
     assert found[0].is_occurrence is True
 
 
+def test_expand_all_day_rrule() -> None:
+    from datetime import UTC, datetime
+
+    from app.services.agent.expand import expand_object
+    from app.sync.ical_types import CalendarEvent, CalendarObject
+
+    master = CalendarEvent(
+        uid="allday-1",
+        summary="Holiday",
+        description="",
+        location="",
+        status=None,
+        start_value="20320601",
+        end_value="20320602",
+        all_day=True,
+        timezone=None,
+        rrule="FREQ=DAILY;COUNT=3",
+        dtstamp="20320601T000000Z",
+    )
+    obj = CalendarObject(uid="allday-1", version="1", components=(master,))
+    found = expand_object(
+        obj,
+        datetime(2032, 6, 1, tzinfo=UTC),
+        datetime(2032, 6, 10, tzinfo=UTC),
+    )
+    assert len(found) == 3
+    assert found[0].all_day is True
+    assert found[0].start == "2032-06-01"
+
+
 def test_mcp_tools_call_services(tmp_path: Path, monkeypatch) -> None:
     client, _fake = _open(tmp_path, monkeypatch)
     try:
         source = _private(client)
         from app.mcp import server as mcp_server
+        from app.services.agent.auth import (
+            VerifiedToken,
+            bind_current_token,
+            reset_current_token,
+        )
 
-        calendars = mcp_server.list_calendars()
-        assert calendars["calendars"]
-        created = mcp_server.create_event_tool(
-            {
+        handle = bind_current_token(
+            VerifiedToken(
+                id="mcp-test",
+                name="mcp",
+                scopes=frozenset({"calendars:read", "calendars:write"}),
+            )
+        )
+        try:
+            calendars = mcp_server.list_calendars()
+            assert calendars["calendars"]
+            created = mcp_server.create_event_tool(
+                {
+                    "calendar": source["id"],
+                    "summary": "Via MCP",
+                    "start": "2033-01-02T10:00:00",
+                    "end": "2033-01-02T11:00:00",
+                    "timezone": "UTC",
+                }
+            )
+            assert "id" in created
+            listed = mcp_server.list_events(
+                window_from="2033-01-01T00:00:00",
+                window_to="2033-01-08T00:00:00",
+            )
+            assert listed["events"]
+            got = mcp_server.get_event_tool(created["id"], fields="standard")
+            assert got["summary"] == "Via MCP"
+            updated = mcp_server.update_event_tool(created["id"], {"summary": "MCP2"})
+            assert updated["summary"] == "MCP2"
+            preview = mcp_server.delete_event_tool(created["id"])
+            assert "confirm_token" in preview
+            done = mcp_server.delete_event_tool(
+                created["id"], confirm_token=preview["confirm_token"]
+            )
+            assert done.get("ok") is True
+            searched = mcp_server.search_events(
+                q="missing-no-hits",
+                window_from="2033-01-01T00:00:00",
+                window_to="2033-01-08T00:00:00",
+            )
+            assert searched["events"] == []
+            assert "error" not in searched
+        finally:
+            reset_current_token(handle)
+    finally:
+        _close(client)
+
+
+def test_mcp_read_only_cannot_write(tmp_path: Path, monkeypatch) -> None:
+    client, _fake = _open(tmp_path, monkeypatch)
+    try:
+        source = _private(client)
+        from app.mcp import server as mcp_server
+        from app.services.agent.auth import (
+            VerifiedToken,
+            bind_current_token,
+            reset_current_token,
+        )
+
+        handle = bind_current_token(
+            VerifiedToken(id="ro", name="ro", scopes=frozenset({"calendars:read"}))
+        )
+        try:
+            created = mcp_server.create_event_tool(
+                {
+                    "calendar": source["id"],
+                    "summary": "Nope",
+                    "start": "2033-01-02T10:00:00",
+                    "end": "2033-01-02T11:00:00",
+                    "timezone": "UTC",
+                }
+            )
+            assert created["error"] == "forbidden"
+            assert created["status"] == 403
+        finally:
+            reset_current_token(handle)
+    finally:
+        _close(client)
+
+
+def test_agent_rejects_bad_timezone_and_all_day_flip(
+    tmp_path: Path, monkeypatch
+) -> None:
+    client, _fake = _open(tmp_path, monkeypatch)
+    try:
+        source = _private(client)
+        token = _bearer(client.app.state.engine)
+        auth = {"Authorization": f"Bearer {token}", **JSON}
+        bad = client.post(
+            "/api/agent/v1/events",
+            headers=auth,
+            json={
                 "calendar": source["id"],
-                "summary": "Via MCP",
-                "start": "2033-01-02T10:00:00",
-                "end": "2033-01-02T11:00:00",
+                "summary": "Bad tz",
+                "start": "2034-01-01T10:00:00",
+                "end": "2034-01-01T11:00:00",
+                "timezone": 123,
+            },
+        )
+        assert bad.status_code == 422
+        created = client.post(
+            "/api/agent/v1/events",
+            headers=auth,
+            json={
+                "calendar": source["id"],
+                "summary": "Flip",
+                "start": "2034-01-01T10:00:00",
+                "end": "2034-01-01T11:00:00",
                 "timezone": "UTC",
-            }
+            },
         )
-        assert "id" in created
-        listed = mcp_server.list_events(
-            window_from="2033-01-01T00:00:00",
-            window_to="2033-01-08T00:00:00",
+        assert created.status_code == 200, created.text
+        event_id = created.json()["id"]
+        flipped = client.patch(
+            f"/api/agent/v1/events/{event_id}",
+            headers=auth,
+            json={"all_day": True},
         )
-        assert listed["events"]
-        got = mcp_server.get_event_tool(created["id"], fields="standard")
-        assert got["summary"] == "Via MCP"
-        updated = mcp_server.update_event_tool(created["id"], {"summary": "MCP2"})
-        assert updated["summary"] == "MCP2"
-        preview = mcp_server.delete_event_tool(created["id"])
-        assert "confirm_token" in preview
-        done = mcp_server.delete_event_tool(
-            created["id"], confirm_token=preview["confirm_token"]
+        assert flipped.status_code == 422
+        ordered = client.post(
+            "/api/agent/v1/events",
+            headers=auth,
+            json={
+                "calendar": source["id"],
+                "summary": "Order",
+                "start": "2034-01-02T12:00:00",
+                "end": "2034-01-02T11:00:00",
+                "timezone": "UTC",
+            },
         )
-        assert done.get("ok") is True
-        searched = mcp_server.search_events(
-            q="missing-no-hits",
-            window_from="2033-01-01T00:00:00",
-            window_to="2033-01-08T00:00:00",
+        assert ordered.status_code == 422
+    finally:
+        _close(client)
+
+
+def test_patch_preserves_exdate_and_exceptions(tmp_path: Path, monkeypatch) -> None:
+    client, fake = _open(tmp_path, monkeypatch)
+    try:
+        source = _private(client)
+        token = _bearer(client.app.state.engine)
+        auth = {"Authorization": f"Bearer {token}", **JSON}
+        created = client.post(
+            "/api/agent/v1/events",
+            headers=auth,
+            json={
+                "calendar": source["id"],
+                "summary": "Series",
+                "start": "2035-03-01T09:00:00",
+                "end": "2035-03-01T10:00:00",
+                "timezone": "UTC",
+                "rrule": "FREQ=DAILY;COUNT=5",
+            },
         )
-        assert searched["events"] == []
-        assert "error" not in searched
+        assert created.status_code == 200, created.text
+        event_id = created.json()["id"]
+        path = next(iter(fake.events))
+        fake.events[path] = (
+            b"BEGIN:VCALENDAR\r\n"
+            b"VERSION:2.0\r\n"
+            b"BEGIN:VEVENT\r\n"
+            b"UID:keep-series\r\n"
+            b"DTSTAMP:20350301T000000Z\r\n"
+            b"DTSTART:20350301T090000Z\r\n"
+            b"DTEND:20350301T100000Z\r\n"
+            b"SUMMARY:Series\r\n"
+            b"RRULE:FREQ=DAILY;COUNT=5\r\n"
+            b"EXDATE:20350303T090000Z\r\n"
+            b"END:VEVENT\r\n"
+            b"BEGIN:VEVENT\r\n"
+            b"UID:keep-series\r\n"
+            b"RECURRENCE-ID:20350302T090000Z\r\n"
+            b"DTSTAMP:20350301T000000Z\r\n"
+            b"DTSTART:20350302T110000Z\r\n"
+            b"DTEND:20350302T120000Z\r\n"
+            b"SUMMARY:Moved\r\n"
+            b"END:VEVENT\r\n"
+            b"END:VCALENDAR\r\n"
+        )
+        from sqlalchemy.orm import Session
+
+        from app.db.models import EventMapping
+
+        with Session(client.app.state.engine) as session, session.begin():
+            row = session.get(EventMapping, event_id)
+            assert row is not None
+            row.ical_uid = "keep-series"
+        # Path must match ical uid used by update_event.
+        old_path = path
+        new_path = old_path.rsplit("/", 1)[0] + "/keep-series.ics"
+        fake.events[new_path] = fake.events.pop(old_path)
+
+        patched = client.patch(
+            f"/api/agent/v1/events/{event_id}",
+            headers=auth,
+            json={"summary": "Series2"},
+        )
+        assert patched.status_code == 200, patched.text
+        stored = fake.events[new_path].decode("utf-8")
+        assert "EXDATE" in stored
+        assert "RECURRENCE-ID" in stored
+        assert "Series2" in stored
+    finally:
+        _close(client)
+
+
+def test_confirm_mismatch_keeps_token(tmp_path: Path, monkeypatch) -> None:
+    from app.services.agent.confirm import ConfirmStore
+
+    store = ConfirmStore(ttl=60)
+    token, _expires = store.issue("event-a", {"id": "event-a"})
+    assert store.consume(token, "event-b") is None
+    assert store.consume(token, "event-a") is not None
+
+
+def test_rate_limiter_does_not_extend_ban() -> None:
+    from app.services.rate_limit import RateLimiter
+
+    limiter = RateLimiter(limit=2, window=60.0)
+    assert limiter.allow("k", now=100.0) is True
+    assert limiter.allow("k", now=101.0) is True
+    assert limiter.allow("k", now=102.0) is False
+    assert limiter.allow("k", now=103.0) is False
+    assert limiter.allow("k", now=161.0) is True
+
+
+def test_search_echoes_default_scan_window(tmp_path: Path, monkeypatch) -> None:
+    client, _fake = _open(tmp_path, monkeypatch)
+    try:
+        _private(client)
+        from app.services.agent import list_or_search_events
+
+        searched = list_or_search_events(
+            client.app.state.engine,
+            client.app.state.radicale,
+            mode="search",
+            q="nothing",
+            window_from=None,
+            window_to=None,
+            calendars=None,
+            limit=10,
+            cursor=None,
+            fields="compact",
+        )
+        assert isinstance(searched, dict)
+        assert searched["applied_defaults"]["window"] == "±366d"
+        assert searched["window"] is not None
     finally:
         _close(client)
 

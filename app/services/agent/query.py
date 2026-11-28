@@ -4,13 +4,16 @@ from __future__ import annotations
 
 import base64
 import json
+import logging
 import re
 import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Any
 from urllib.parse import unquote
 
+from sqlalchemy import select, text
 from sqlalchemy.engine import Engine
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.db.models import EventMapping
@@ -23,12 +26,13 @@ from app.services.agent.types import (
     AgentError,
     invalid,
 )
-from app.sync.apply import load_mapping_by_uid, utc_now
+from app.sync.apply import utc_now
 from app.sync.ical import CalendarEvent, parse_vcalendar
-from app.sync.ical_types import CalendarParseError
+from app.sync.ical_types import CalendarObject, CalendarParseError
 
 _DATE = re.compile(r"^(\d{4})-(\d{2})-(\d{2})$")
 _CLOCK = re.compile(r"^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?$")
+logger = logging.getLogger("app")
 
 
 def resolve_list_window(
@@ -45,10 +49,15 @@ def resolve_list_window(
 
 def resolve_search_window(
     window_from: str | None, window_to: str | None
-) -> tuple[tuple[datetime, datetime] | None, AgentError | None]:
+) -> tuple[tuple[datetime, datetime] | None, AgentError | None, dict]:
+    applied: dict[str, Any] = {}
     if window_from is None and window_to is None:
-        return None, None
-    return parse_window(window_from, window_to)
+        end = datetime.now(UTC) + timedelta(days=MAX_WINDOW_DAYS)
+        start = datetime.now(UTC) - timedelta(days=MAX_WINDOW_DAYS)
+        applied["window"] = "±366d"
+        return (start, end), None, applied
+    window, error = parse_window(window_from, window_to)
+    return window, error, applied
 
 
 def parse_window(
@@ -109,22 +118,42 @@ def collect_events(
         start = datetime.now(UTC) - timedelta(days=MAX_WINDOW_DAYS)
         end = datetime.now(UTC) + timedelta(days=MAX_WINDOW_DAYS)
     found: list[dict] = []
-    for source in sources:
-        hrefs = radicale.list_event_hrefs(source["collection_path"])
-        for href in hrefs:
-            payload = radicale.get_event(href)
-            if payload is None:
-                continue
-            ical_uid = uid_from_href(href)
-            try:
-                objects = parse_vcalendar(payload.decode("utf-8"), source["timezone"])
-            except (UnicodeDecodeError, CalendarParseError):
-                continue
-            mapping = ensure_mapping_for_uid(engine, source["id"], ical_uid)
-            for obj in objects:
-                if obj.uid and obj.uid != ical_uid:
-                    mapping = ensure_mapping_for_uid(engine, source["id"], obj.uid)
-                for item in expand_object(obj, start, end):
+    with Session(engine) as session:
+        for source in sources:
+            hrefs = radicale.list_event_hrefs(source["collection_path"])
+            parsed_rows: list[tuple[str, CalendarObject]] = []
+            needed: list[str] = []
+            for href in hrefs:
+                payload = radicale.get_event(href)
+                if payload is None:
+                    continue
+                ical_uid = uid_from_href(href)
+                try:
+                    objects = parse_vcalendar(
+                        payload.decode("utf-8"), source["timezone"]
+                    )
+                except (UnicodeDecodeError, CalendarParseError):
+                    continue
+                for obj in objects:
+                    uid = obj.uid or ical_uid
+                    needed.append(uid)
+                    parsed_rows.append((uid, obj))
+            cache = _ensure_mappings(session, source["id"], needed)
+            for uid, obj in parsed_rows:
+                mapping = cache.get(uid)
+                if mapping is None:
+                    continue
+                try:
+                    occurrences = expand_object(obj, start, end)
+                except (TypeError, ValueError) as exc:
+                    logger.warning(
+                        "agent_expand_skip source_id=%s uid=%s detail=%s",
+                        source["id"],
+                        obj.uid,
+                        type(exc).__name__,
+                    )
+                    continue
+                for item in occurrences:
                     if needle and not matches(item.event, needle):
                         continue
                     found.append(
@@ -138,29 +167,14 @@ def collect_events(
     return found
 
 
-def ensure_mapping_for_uid(
-    engine: Engine, source_id: str, ical_uid: str
-) -> EventMapping:
-    with Session(engine) as session, session.begin():
-        existing = load_mapping_by_uid(session, source_id, ical_uid)
-        if existing is not None:
-            session.expunge(existing)
-            return existing
-        mapping_id = str(uuid.uuid4())
-        when = utc_now()
-        row = EventMapping(
-            id=mapping_id,
-            source_id=source_id,
-            external_id=f"caldav:{ical_uid}",
-            ical_uid=ical_uid,
-            external_version=when,
-            last_synced_at=when,
-            deleted_at=None,
+def ensure_mapping_uid_index(engine: Engine) -> None:
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_event_mappings_source_ical_uid "
+                "ON event_mappings (source_id, ical_uid)"
+            )
         )
-        session.add(row)
-        session.flush()
-        session.expunge(row)
-        return row
 
 
 def matches(event: CalendarEvent, needle: str) -> bool:
@@ -196,3 +210,64 @@ def decode_cursor(cursor: str | None) -> int | None:
 
 def iso_out(value: datetime) -> str:
     return value.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _load_mappings(session: Session, source_id: str) -> dict[str, EventMapping]:
+    rows = session.scalars(
+        select(EventMapping).where(
+            EventMapping.source_id == source_id,
+            EventMapping.deleted_at.is_(None),
+        )
+    ).all()
+    found: dict[str, EventMapping] = {}
+    for row in rows:
+        found[row.ical_uid] = row
+    return found
+
+
+def _ensure_mappings(
+    session: Session, source_id: str, ical_uids: list[str]
+) -> dict[str, EventMapping]:
+    cache = _load_mappings(session, source_id)
+    missing = [uid for uid in dict.fromkeys(ical_uids) if uid not in cache]
+    if not missing:
+        return cache
+    when = utc_now()
+    created: list[EventMapping] = []
+    for ical_uid in missing:
+        created.append(
+            EventMapping(
+                id=str(uuid.uuid4()),
+                source_id=source_id,
+                external_id=f"caldav:{ical_uid}",
+                ical_uid=ical_uid,
+                external_version=when,
+                last_synced_at=when,
+                deleted_at=None,
+            )
+        )
+    try:
+        session.add_all(created)
+        session.commit()
+        for row in created:
+            cache[row.ical_uid] = row
+    except IntegrityError:
+        session.rollback()
+        cache = _load_mappings(session, source_id)
+        still = [uid for uid in missing if uid not in cache]
+        if still:
+            when = utc_now()
+            for ical_uid in still:
+                row = EventMapping(
+                    id=str(uuid.uuid4()),
+                    source_id=source_id,
+                    external_id=f"caldav:{ical_uid}",
+                    ical_uid=ical_uid,
+                    external_version=when,
+                    last_synced_at=when,
+                    deleted_at=None,
+                )
+                session.add(row)
+                cache[ical_uid] = row
+            session.commit()
+    return cache
