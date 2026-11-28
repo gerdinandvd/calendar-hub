@@ -49,6 +49,10 @@ branch = true
 show_missing = true
 # Floor of default-suite baseline (83%) rounded down to nearest 5.
 fail_under = 80
+exclude_also = [
+    "if TYPE_CHECKING:",
+    "^\\s*\\.\\.\\.\\s*$",
+]
 
 [tool.ruff]
 target-version = "py312"
@@ -130,6 +134,7 @@ ignore-signatures = true
 
 [tool.importlinter]
 root_package = "app"
+include_external_packages = true
 
 [[tool.importlinter.contracts]]
 name = "Sync importers and Radicale client are independent"
@@ -171,4 +176,77 @@ layers = [
     "app.services | app.health | app.i18n",
     "app.sync",
     "app.radicale | app.db",
+    "app.ports | app.config",
+    "app.domain",
+]
+
+[[tool.importlinter.contracts]]
+name = "Domain imports nothing from other app packages or frameworks"
+type = "forbidden"
+source_modules = ["app.domain"]
+forbidden_modules = [
+    "app.ports",
+    "app.config",
+    "app.main",
+    "app.api",
+    "app.ui",
+    "app.mcp",
+    "app.services",
+    "app.health",
+    "app.i18n",
+    "app.sync",
+    "app.radicale",
+    "app.db",
+    "app.secrets",
+    "app.log",
+    "app.access",
+    "fastapi",
+    "sqlalchemy",
+    "http",
+    "os",
+]
+
+[[tool.importlinter.contracts]]
+name = "Ports may import domain only"
+type = "forbidden"
+source_modules = ["app.ports"]
+forbidden_modules = [
+    "app.config",
+    "app.main",
+    "app.api",
+    "app.ui",
+    "app.mcp",
+    "app.services",
+    "app.health",
+    "app.i18n",
+    "app.sync",
+    "app.radicale",
+    "app.db",
+    "app.secrets",
+    "app.log",
+    "app.access",
+    "fastapi",
+    "sqlalchemy",
+]
+
+[[tool.importlinter.contracts]]
+name = "Config imports no other app packages"
+type = "forbidden"
+source_modules = ["app.config"]
+forbidden_modules = [
+    "app.domain",
+    "app.ports",
+    "app.main",
+    "app.api",
+    "app.ui",
+    "app.mcp",
+    "app.services",
+    "app.health",
+    "app.i18n",
+    "app.sync",
+    "app.radicale",
+    "app.db",
+    "app.secrets",
+    "app.log",
+    "app.access",
 ]

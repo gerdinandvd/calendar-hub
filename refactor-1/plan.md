@@ -24,12 +24,12 @@ Do not redesign the pyramid yet. Make the current suite editable during the move
 
 ## Phase 2 — Domain, Settings, ports skeleton
 
-- [ ] Add `app/domain/` (types, single `rrules`, pure iCal/time helpers, domain errors without HTTP/i18n)
-- [ ] Add `app/ports/` (`CalendarStore`, repos, `FeedFetcher`, `SyncCoordinator`, `Clock`, `AuditLogger`, …)
-- [ ] Add frozen `app/config.py` `Settings`; composition root loads env once
-- [ ] Update `[tool.importlinter]` contracts to the target layering
-- [ ] Move or re-export existing pure helpers behind domain without changing behaviour yet
-- [ ] Keep suite green
+- [x] Add `app/domain/` (types, single `rrules`, pure iCal/time helpers, domain errors without HTTP/i18n)
+- [x] Add `app/ports/` (`CalendarStore`, repos, `FeedFetcher`, `SyncCoordinator`, `Clock`, `AuditLogger`, …)
+- [x] Add frozen `app/config.py` `Settings`; composition root loads env once
+- [x] Update `[tool.importlinter]` contracts to the target layering
+- [x] Move or re-export existing pure helpers behind domain without changing behaviour yet
+- [x] Keep suite green
 
 ## Phase 3 — Adapters foundation
 

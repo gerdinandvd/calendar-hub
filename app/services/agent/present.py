@@ -63,7 +63,7 @@ def _enrich(
     body["description"] = description
     body["location"] = event.location or ""
     body["timezone"] = timezone
-    body["rrule"] = event.rrule
+    body["rrule"] = event.rrules[0] if event.rrules else None
     return body
 
 

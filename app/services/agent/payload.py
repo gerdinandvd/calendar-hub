@@ -120,7 +120,7 @@ def merge_patch(
         "end_value": master.end_value,
         "timezone": master.timezone or source_timezone,
         "status": master.status,
-        "rrule": master.rrule,
+        "rrules": master.rrules,
     }
     error = _apply_patch_fields(data, payload, master, source_timezone)
     if error is not None:
@@ -138,7 +138,7 @@ def merge_patch(
         end_value=data["end_value"],
         all_day=data["all_day"],
         timezone=None if data["all_day"] else data["timezone"],
-        rrule=data["rrule"],
+        rrules=data["rrules"],
         dtstamp=stamp,
         recurrence_id=None,
     )
@@ -161,8 +161,8 @@ def to_calendar_event(parsed: dict, uid: str) -> CalendarEvent:
         end_value=parsed["end_value"],
         all_day=parsed["all_day"],
         timezone=zone,
-        rrule=parsed["rrule"],
         dtstamp=stamp,
+        rrules=() if parsed["rrule"] is None else (parsed["rrule"],),
     )
 
 
@@ -259,7 +259,8 @@ def _patch_meta(data: dict, payload: dict, source_timezone: str) -> AgentError |
             return invalid(str(exc))
     if "rrule" in payload:
         try:
-            data["rrule"] = map_rrule(payload["rrule"])
+            rule = map_rrule(payload["rrule"])
         except TimeValueError as exc:
             return invalid(str(exc))
+        data["rrules"] = () if rule is None else (rule,)
     return None

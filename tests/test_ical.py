@@ -22,7 +22,6 @@ def _event(**overrides) -> CalendarEvent:
         "end_value": "20261007T100015",
         "all_day": False,
         "timezone": "Europe/Amsterdam",
-        "rrule": None,
         "dtstamp": "20261008T120000Z",
     }
     values.update(overrides)
@@ -40,7 +39,7 @@ def test_timed_event_keeps_seconds_and_zone() -> None:
             description="a;b,c\\d",
             location="Room 1",
             status="CONFIRMED",
-            rrule="FREQ=WEEKLY;BYDAY=MO",
+            rrules=("FREQ=WEEKLY;BYDAY=MO",),
         )
     )
     unfolded = _unfold(text)

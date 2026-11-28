@@ -108,8 +108,8 @@ def calendar_bytes(command: Upsert, uid: str) -> bytes:
             end_value=command.end_value,
             all_day=command.all_day,
             timezone=None if command.all_day else command.timezone,
-            rrule=command.rrule,
             dtstamp=stamp,
+            rrules=() if command.rrule is None else (command.rrule,),
         )
     )
     return text.encode("utf-8")
