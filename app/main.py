@@ -13,6 +13,7 @@ from app.api.routers.health import router as health_router
 from app.api.routers.sources import router as sources_router
 from app.api.routers.sync import router as sync_router
 from app.api.routers.webhooks import router as webhooks_router
+from app.config import Settings
 from app.db.models import Base
 from app.db.session import make_engine
 from app.health import Heartbeat
@@ -58,9 +59,14 @@ _mcp_mount = _McpMount()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-    engine = make_engine()
+    settings: Settings = app.state.settings
+    engine = make_engine(settings.sqlite_path)
     app.state.engine = engine
-    app.state.radicale = RadicaleClient.from_env()
+    app.state.radicale = RadicaleClient(
+        base_url=settings.radicale_url,
+        username=settings.radicale_internal_user,
+        password=settings.radicale_internal_password,
+    )
     heartbeat = None
     scheduler = None
     try:
@@ -96,9 +102,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         engine.dispose()
 
 
-def create_app() -> FastAPI:
+def create_app(settings: Settings | None = None) -> FastAPI:
     configure_logging()
     application = FastAPI(lifespan=lifespan)
+    application.state.settings = settings or Settings.from_env()
     install_access(application)
     application.include_router(health_router)
     application.include_router(sources_router)

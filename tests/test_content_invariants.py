@@ -17,7 +17,7 @@ def test_admin_has_no_python() -> None:
 
 
 def test_vevent_marker_only_allowed_in_ical() -> None:
-    allowed = (APP / "sync" / "ical.py").resolve()
+    allowed = (APP / "domain" / "ical.py").resolve()
     marker = VEVENT_MARKER.encode("ascii")
     offenders = []
     for path in APP.rglob("*"):

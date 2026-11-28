@@ -310,8 +310,8 @@ def test_expand_weekly_occurrences(hub_client, fake_radicale) -> None:
         end_value="20320601T093000",
         all_day=False,
         timezone="UTC",
-        rrule="FREQ=DAILY;COUNT=3",
         dtstamp="20320601T000000Z",
+        rrules=("FREQ=DAILY;COUNT=3",),
     )
     obj = CalendarObject(uid="series-1", version="1", components=(master,))
     found = expand_object(
@@ -339,8 +339,8 @@ def test_expand_all_day_rrule(hub_client, fake_radicale) -> None:
         end_value="20320602",
         all_day=True,
         timezone=None,
-        rrule="FREQ=DAILY;COUNT=3",
         dtstamp="20320601T000000Z",
+        rrules=("FREQ=DAILY;COUNT=3",),
     )
     obj = CalendarObject(uid="allday-1", version="1", components=(master,))
     found = expand_object(
