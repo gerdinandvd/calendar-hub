@@ -15,12 +15,12 @@ Context: the project is not in active use. Prefer clean cuts, fresh schema, and 
 
 Do not redesign the pyramid yet. Make the current suite editable during the move.
 
-- [ ] Unify one `FakeRadicale` / `FakeCalendarStore` in `tests/conftest.py`
-- [ ] Add shared `hub_client` and `db_engine` fixtures; stop per-file `_open` / `_close` copies
-- [ ] Stop `test_faults` / `test_performance` importing private helpers from other test modules
-- [ ] Delete `tests/test_harness.py` and unused conftest-only smoke
-- [ ] Monkeypatch `MAX_EVENTS` in capacity tests instead of seeding ~20k fake events
-- [ ] Confirm default `pytest` still green
+- [x] Unify one `FakeRadicale` / `FakeCalendarStore` in `tests/conftest.py`
+- [x] Add shared `hub_client` and `db_engine` fixtures; stop per-file `_open` / `_close` copies
+- [x] Stop `test_faults` / `test_performance` importing private helpers from other test modules
+- [x] Delete `tests/test_harness.py` and unused conftest-only smoke
+- [x] Monkeypatch `MAX_EVENTS` in capacity tests instead of seeding ~20k fake events
+- [x] Confirm default `pytest` still green
 
 ## Phase 2 — Domain, Settings, ports skeleton
 
