@@ -21,13 +21,11 @@ from app.services.agent.events import (
     list_or_search_events,
     update_event,
 )
-from app.services.agent.idempotency import IdempotencyStore
 from app.services.agent.types import SCOPE_READ, SCOPE_WRITE, AgentError
 
 __all__ = [
     "AgentError",
     "ConfirmStore",
-    "IdempotencyStore",
     "SCOPE_READ",
     "SCOPE_WRITE",
     "authenticate_agent",

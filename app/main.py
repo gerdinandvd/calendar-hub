@@ -23,7 +23,6 @@ from app.mcp.server import build_mcp_app
 from app.mcp.server import mcp as mcp_server
 from app.radicale.client import RadicaleClient
 from app.services.agent import ConfirmStore
-from app.services.agent.idempotency import IdempotencyStore
 from app.services.agent.query import ensure_mapping_uid_index
 from app.services.rate_limit import RateLimiter
 from app.services.sources.sync_ops import (
@@ -74,7 +73,6 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         app.state.webhook_rates = RateLimiter()
         app.state.agent_rates = RateLimiter()
         app.state.agent_confirms = ConfirmStore()
-        app.state.agent_idempotency = IdempotencyStore()
         bind_mcp(engine, app.state.radicale, app.state.agent_confirms)
         mcp_asgi = build_mcp_app()
         _mcp_mount.app = AgentBearerMiddleware(

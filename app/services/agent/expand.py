@@ -115,10 +115,6 @@ def expand_object(
     return found
 
 
-def master_for_response(obj: CalendarObject) -> CalendarEvent:
-    return obj.components[0]
-
-
 def _rules(event: CalendarEvent) -> list[str]:
     rules: list[str] = []
     if event.rrule:

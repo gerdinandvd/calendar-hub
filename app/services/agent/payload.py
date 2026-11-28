@@ -2,28 +2,22 @@
 
 from __future__ import annotations
 
-import re
 from dataclasses import replace
-from datetime import UTC, date, datetime
-from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+from datetime import UTC, datetime
 
-from pydantic import ValidationError
-
-from app.services.agent.schemas import AgentCreateEvent, AgentPatchEvent
-from app.services.agent.types import AgentError, invalid
+from app.services.agent.types import SUMMARY_MAX_LEN, TEXT_MAX_LEN, AgentError, invalid
 from app.sync.ical import CalendarEvent
+from app.sync.time_values import (
+    TimeValueError,
+    compact_clock,
+    compact_date,
+    map_rrule,
+    map_status,
+    timezone_ok,
+)
 
-_DATE = re.compile(r"^(\d{4})-(\d{2})-(\d{2})$")
-_CLOCK = re.compile(r"^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?$")
-_RRULE = re.compile(r"^FREQ=(DAILY|WEEKLY|MONTHLY|YEARLY)(;[A-Z0-9-]+=[A-Z0-9,+-]+)*$")
-_STATUSES = {
-    "confirmed": "CONFIRMED",
-    "tentative": "TENTATIVE",
-    "cancelled": "CANCELLED",
-}
-CREATE_KEYS = frozenset(
+PATCH_KEYS = frozenset(
     {
-        "calendar",
         "summary",
         "start",
         "end",
@@ -35,66 +29,88 @@ CREATE_KEYS = frozenset(
         "status",
     }
 )
-PATCH_KEYS = CREATE_KEYS - {"calendar"}
+CREATE_KEYS = PATCH_KEYS | {"calendar"}
 
 
 def parse_create(payload: object) -> dict | AgentError:
+    if not isinstance(payload, dict) or set(payload) - CREATE_KEYS:
+        return invalid("The input is invalid.")
+    core = _create_required(payload)
+    if isinstance(core, AgentError):
+        return core
+    extras = _create_optional(payload)
+    if isinstance(extras, AgentError):
+        return extras
+    return {**core, **extras}
+
+
+def _create_required(payload: dict) -> dict | AgentError:
+    calendar = payload.get("calendar")
+    if not isinstance(calendar, str) or not calendar.strip():
+        return invalid("Enter a calendar.")
+    summary = payload.get("summary")
+    if not isinstance(summary, str) or not summary.strip():
+        return invalid("Enter a summary.")
+    if len(summary) > SUMMARY_MAX_LEN:
+        return invalid("The input is invalid.")
+    all_day = payload.get("all_day", False)
+    if not isinstance(all_day, bool):
+        return invalid("The input is invalid.")
+    start = payload.get("start")
+    end = payload.get("end")
+    if not isinstance(start, str) or not isinstance(end, str):
+        return invalid("Enter a start and end.")
     try:
-        body = AgentCreateEvent.model_validate(payload)
-    except ValidationError as exc:
-        return _validation_error(exc)
-    all_day = body.all_day
-    start_value = date_value(body.start) if all_day else clock_value(body.start)
-    end_value = date_value(body.end) if all_day else clock_value(body.end)
-    if isinstance(start_value, AgentError):
-        return start_value
-    if isinstance(end_value, AgentError):
-        return end_value
-    order = _order_ok(start_value, end_value, all_day)
-    if isinstance(order, AgentError):
-        return order
-    status = status_value({"status": body.status} if body.status is not None else {})
-    if isinstance(status, AgentError):
-        return status
-    rrule = rrule_value({"rrule": body.rrule} if body.rrule is not None else {})
-    if isinstance(rrule, AgentError):
-        return rrule
-    if body.timezone is not None and not timezone_ok(body.timezone):
-        return invalid("Enter a valid time zone.")
-    description = body.description or ""
-    location = body.location or ""
+        start_value = compact_date(start) if all_day else compact_clock(start)
+        end_value = compact_date(end) if all_day else compact_clock(end)
+    except TimeValueError as exc:
+        return invalid(str(exc))
+    if end_value <= start_value:
+        return invalid("end must be after start.")
     return {
-        "calendar": body.calendar.strip(),
-        "summary": body.summary,
-        "description": description.replace("\r\n", "\n").replace("\r", "\n"),
-        "location": location.replace("\r\n", "\n").replace("\r", "\n"),
+        "calendar": calendar.strip(),
+        "summary": summary,
         "all_day": all_day,
         "start_value": start_value,
         "end_value": end_value,
-        "timezone": body.timezone,
+    }
+
+
+def _create_optional(payload: dict) -> dict | AgentError:
+    timezone = payload.get("timezone")
+    if timezone is not None and (
+        not isinstance(timezone, str) or not timezone_ok(timezone)
+    ):
+        return invalid("Enter a valid time zone.")
+    description = payload.get("description", "")
+    location = payload.get("location", "")
+    if description is None:
+        description = ""
+    if location is None:
+        location = ""
+    if not isinstance(description, str) or not isinstance(location, str):
+        return invalid("The input is invalid.")
+    if len(description) > TEXT_MAX_LEN or len(location) > TEXT_MAX_LEN:
+        return invalid("The input is invalid.")
+    try:
+        status = map_status(payload.get("status")) if "status" in payload else None
+        rrule = map_rrule(payload.get("rrule")) if "rrule" in payload else None
+    except TimeValueError as exc:
+        return invalid(str(exc))
+    return {
+        "description": description.replace("\r\n", "\n").replace("\r", "\n"),
+        "location": location.replace("\r\n", "\n").replace("\r", "\n"),
+        "timezone": timezone,
         "status": status,
         "rrule": rrule,
     }
 
 
-def parse_patch(payload: object) -> dict | AgentError:
-    if not isinstance(payload, dict):
-        return invalid("The input is invalid.")
-    if set(payload) - PATCH_KEYS:
-        return invalid("The input is invalid.")
-    try:
-        AgentPatchEvent.model_validate(payload)
-    except ValidationError as exc:
-        return _validation_error(exc)
-    return payload
-
-
 def merge_patch(
     master: CalendarEvent, payload: dict, source_timezone: str
 ) -> CalendarEvent | AgentError:
-    parsed = parse_patch(payload)
-    if isinstance(parsed, AgentError):
-        return parsed
+    if set(payload) - PATCH_KEYS:
+        return invalid("The input is invalid.")
     data = {
         "summary": master.summary,
         "description": master.description,
@@ -109,10 +125,8 @@ def merge_patch(
     error = _apply_patch_fields(data, payload, master, source_timezone)
     if error is not None:
         return error
-    if data["end_value"] is not None:
-        order = _order_ok(data["start_value"], data["end_value"], data["all_day"])
-        if isinstance(order, AgentError):
-            return order
+    if data["end_value"] is not None and data["end_value"] <= data["start_value"]:
+        return invalid("end must be after start.")
     stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
     return replace(
         master,
@@ -127,6 +141,28 @@ def merge_patch(
         rrule=data["rrule"],
         dtstamp=stamp,
         recurrence_id=None,
+    )
+
+
+def to_calendar_event(parsed: dict, uid: str) -> CalendarEvent:
+    zone = parsed["timezone"]
+    if parsed["all_day"]:
+        zone = None
+    elif zone is None or not timezone_ok(zone):
+        zone = "UTC"
+    stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+    return CalendarEvent(
+        uid=uid,
+        summary=parsed["summary"],
+        description=parsed["description"],
+        location=parsed["location"],
+        status=parsed["status"],
+        start_value=parsed["start_value"],
+        end_value=parsed["end_value"],
+        all_day=parsed["all_day"],
+        timezone=zone,
+        rrule=parsed["rrule"],
+        dtstamp=stamp,
     )
 
 
@@ -147,15 +183,20 @@ def _apply_patch_fields(
 
 def _patch_text_fields(data: dict, payload: dict) -> AgentError | None:
     if "summary" in payload:
-        if payload["summary"] is None or not isinstance(payload["summary"], str):
+        summary = payload["summary"]
+        if summary is None or not isinstance(summary, str) or not summary.strip():
             return invalid("Enter a summary.")
-        data["summary"] = payload["summary"]
+        if len(summary) > SUMMARY_MAX_LEN:
+            return invalid("The input is invalid.")
+        data["summary"] = summary
     for key in ("description", "location"):
         if key not in payload:
             continue
         if payload[key] is None:
             data[key] = ""
         elif isinstance(payload[key], str):
+            if len(payload[key]) > TEXT_MAX_LEN:
+                return invalid("The input is invalid.")
             data[key] = payload[key].replace("\r\n", "\n").replace("\r", "\n")
         else:
             return invalid("The input is invalid.")
@@ -176,26 +217,26 @@ def _patch_timing(
     if "start" in payload:
         if not isinstance(payload["start"], str):
             return invalid("Enter a start.")
-        start_value = (
-            date_value(payload["start"])
-            if data["all_day"]
-            else clock_value(payload["start"])
-        )
-        if isinstance(start_value, AgentError):
-            return start_value
-        data["start_value"] = start_value
+        try:
+            data["start_value"] = (
+                compact_date(payload["start"])
+                if data["all_day"]
+                else compact_clock(payload["start"])
+            )
+        except TimeValueError as exc:
+            return invalid(str(exc))
     if "end" in payload:
         if payload["end"] is None:
             data["end_value"] = None
         elif isinstance(payload["end"], str):
-            end_value = (
-                date_value(payload["end"])
-                if data["all_day"]
-                else clock_value(payload["end"])
-            )
-            if isinstance(end_value, AgentError):
-                return end_value
-            data["end_value"] = end_value
+            try:
+                data["end_value"] = (
+                    compact_date(payload["end"])
+                    if data["all_day"]
+                    else compact_clock(payload["end"])
+                )
+            except TimeValueError as exc:
+                return invalid(str(exc))
         else:
             return invalid("Enter an end.")
     return None
@@ -212,118 +253,13 @@ def _patch_meta(data: dict, payload: dict, source_timezone: str) -> AgentError |
         else:
             return invalid("Enter a valid time zone.")
     if "status" in payload:
-        status = status_value({"status": payload["status"]})
-        if isinstance(status, AgentError):
-            return status
-        data["status"] = status
+        try:
+            data["status"] = map_status(payload["status"])
+        except TimeValueError as exc:
+            return invalid(str(exc))
     if "rrule" in payload:
-        rrule = rrule_value({"rrule": payload["rrule"]})
-        if isinstance(rrule, AgentError):
-            return rrule
-        data["rrule"] = rrule
+        try:
+            data["rrule"] = map_rrule(payload["rrule"])
+        except TimeValueError as exc:
+            return invalid(str(exc))
     return None
-
-
-def to_calendar_event(parsed: dict, uid: str) -> CalendarEvent:
-    zone = parsed["timezone"]
-    if parsed["all_day"]:
-        zone = None
-    elif zone is None:
-        zone = "UTC"
-    elif not isinstance(zone, str) or not timezone_ok(zone):
-        zone = "UTC"
-    stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
-    return CalendarEvent(
-        uid=uid,
-        summary=parsed["summary"],
-        description=parsed["description"],
-        location=parsed["location"],
-        status=parsed["status"],
-        start_value=parsed["start_value"],
-        end_value=parsed["end_value"],
-        all_day=parsed["all_day"],
-        timezone=zone,
-        rrule=parsed["rrule"],
-        dtstamp=stamp,
-    )
-
-
-def date_value(value: str) -> str | AgentError:
-    match = _DATE.fullmatch(value)
-    if match is None:
-        return invalid("Enter a start.")
-    year, month, day = (int(part) for part in match.groups())
-    try:
-        date(year, month, day)
-    except ValueError:
-        return invalid("Enter a start.")
-    return f"{year:04}{month:02}{day:02}"
-
-
-def clock_value(value: str) -> str | AgentError:
-    match = _CLOCK.fullmatch(value)
-    if match is None:
-        return invalid("Enter a start.")
-    year, month, day, hour, minute, second = match.groups()
-    try:
-        datetime(
-            int(year),
-            int(month),
-            int(day),
-            int(hour),
-            int(minute),
-            int(second) if second is not None else 0,
-        )
-    except ValueError:
-        return invalid("Enter a start.")
-    compact = f"{year}{month}{day}T{hour}{minute}"
-    if second is not None:
-        compact += second
-    else:
-        compact += "00"
-    return compact
-
-
-def status_value(payload: dict) -> str | None | AgentError:
-    if "status" not in payload or payload["status"] is None:
-        return None
-    value = payload["status"]
-    if not isinstance(value, str) or value not in _STATUSES:
-        return invalid("The input is invalid.")
-    return _STATUSES[value]
-
-
-def rrule_value(payload: dict) -> str | None | AgentError:
-    if "rrule" not in payload or payload["rrule"] is None:
-        return None
-    value = payload["rrule"]
-    if not isinstance(value, str) or _RRULE.fullmatch(value) is None:
-        return invalid("Enter a valid recurrence rule.")
-    return value
-
-
-def timezone_ok(value: object) -> bool:
-    if not isinstance(value, str) or not value:
-        return False
-    try:
-        ZoneInfo(value)
-    except (ZoneInfoNotFoundError, ValueError, TypeError):
-        return False
-    return True
-
-
-def _order_ok(start_value: str, end_value: str, all_day: bool) -> None | AgentError:
-    del all_day
-    if end_value <= start_value:
-        return invalid("end must be after start.")
-    return None
-
-
-def _validation_error(exc: ValidationError) -> AgentError:
-    for err in exc.errors():
-        msg = err.get("msg") or ""
-        if msg.startswith("Value error, "):
-            msg = msg[len("Value error, ") :]
-        if msg:
-            return invalid(msg)
-    return invalid("The input is invalid.")

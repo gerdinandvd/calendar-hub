@@ -1,14 +1,9 @@
-"""Serialize agent event payloads at compact/standard/full field levels."""
+"""Serialize agent event payloads at compact/standard field levels."""
 
 from __future__ import annotations
 
 from app.services.agent.expand import Occurrence, _agent_instant
-from app.services.agent.types import (
-    DESCRIPTION_COMPACT_LEN,
-    FIELD_COMPACT,
-    FIELD_FULL,
-    FIELD_STANDARD,
-)
+from app.services.agent.types import DESCRIPTION_COMPACT_LEN, FIELD_COMPACT
 from app.sync.ical_types import CalendarEvent
 
 
@@ -63,15 +58,12 @@ def _enrich(
     if fields == FIELD_COMPACT:
         return body
     description = event.description or ""
-    if fields == FIELD_STANDARD:
-        if len(description) > DESCRIPTION_COMPACT_LEN:
-            description = description[: DESCRIPTION_COMPACT_LEN - 1] + "…"
+    if len(description) > DESCRIPTION_COMPACT_LEN:
+        description = description[: DESCRIPTION_COMPACT_LEN - 1] + "…"
     body["description"] = description
     body["location"] = event.location or ""
     body["timezone"] = timezone
-    if fields == FIELD_FULL:
-        body["rrule"] = event.rrule
-        body["status"] = _status_out(event.status)
+    body["rrule"] = event.rrule
     return body
 
 

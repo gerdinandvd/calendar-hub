@@ -177,23 +177,6 @@ def ensure_mapping_uid_index(engine: Engine) -> None:
         )
 
 
-def ensure_mapping_for_uid(
-    engine: Engine, source_id: str, ical_uid: str
-) -> EventMapping:
-    with Session(engine) as session:
-        cache = _ensure_mappings(session, source_id, [ical_uid])
-        row = cache[ical_uid]
-        return EventMapping(
-            id=row.id,
-            source_id=row.source_id,
-            external_id=row.external_id,
-            ical_uid=row.ical_uid,
-            external_version=row.external_version,
-            last_synced_at=row.last_synced_at,
-            deleted_at=row.deleted_at,
-        )
-
-
 def matches(event: CalendarEvent, needle: str) -> bool:
     hay = f"{event.summary}\n{event.description}\n{event.location}".lower()
     return needle in hay

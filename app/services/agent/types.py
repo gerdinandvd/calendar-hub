@@ -20,8 +20,7 @@ TEXT_MAX_LEN = 8192
 
 FIELD_COMPACT = "compact"
 FIELD_STANDARD = "standard"
-FIELD_FULL = "full"
-VALID_FIELDS = frozenset({FIELD_COMPACT, FIELD_STANDARD, FIELD_FULL})
+VALID_FIELDS = frozenset({FIELD_COMPACT, FIELD_STANDARD})
 
 
 @dataclass(frozen=True)
@@ -29,10 +28,6 @@ class AgentError:
     status: int
     error: str
     detail: str
-
-
-def unauthorized(detail: str = "Authentication required.") -> AgentError:
-    return AgentError(401, "unauthorized", detail)
 
 
 def forbidden(detail: str = "Missing required scope.") -> AgentError:

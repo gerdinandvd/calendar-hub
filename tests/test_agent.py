@@ -364,12 +364,13 @@ def test_agent_patch_search_fields_and_confirm(tmp_path: Path, monkeypatch) -> N
             calendars=None,
             limit=10,
             cursor=None,
-            fields="full",
+            fields="standard",
         )
         assert isinstance(searched, dict)
         assert searched["q"] == "Beta"
-        assert searched["fields"] == "full"
+        assert searched["fields"] == "standard"
         assert searched["events"]
+        assert "rrule" in searched["events"][0]
 
         bad = client.delete(
             f"/api/agent/v1/events/{event_id}",
@@ -652,33 +653,6 @@ def test_patch_preserves_exdate_and_exceptions(tmp_path: Path, monkeypatch) -> N
         assert "EXDATE" in stored
         assert "RECURRENCE-ID" in stored
         assert "Series2" in stored
-    finally:
-        _close(client)
-
-
-def test_idempotency_key_replays_create(tmp_path: Path, monkeypatch) -> None:
-    client, fake = _open(tmp_path, monkeypatch)
-    try:
-        source = _private(client)
-        token = _bearer(client.app.state.engine)
-        headers = {
-            "Authorization": f"Bearer {token}",
-            "Idempotency-Key": "create-once",
-            **JSON,
-        }
-        body = {
-            "calendar": source["id"],
-            "summary": "Once",
-            "start": "2036-01-01T09:00:00",
-            "end": "2036-01-01T10:00:00",
-            "timezone": "UTC",
-        }
-        first = client.post("/api/agent/v1/events", headers=headers, json=body)
-        assert first.status_code == 200, first.text
-        second = client.post("/api/agent/v1/events", headers=headers, json=body)
-        assert second.status_code == 200, second.text
-        assert first.json()["id"] == second.json()["id"]
-        assert len(fake.events) == 1
     finally:
         _close(client)
 

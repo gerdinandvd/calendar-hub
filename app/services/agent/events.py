@@ -16,13 +16,7 @@ from app.radicale.client import RadicaleClient, RadicaleError
 from app.services.agent.auth import current_token
 from app.services.agent.calendars import load_enabled_sources
 from app.services.agent.confirm import ConfirmStore
-from app.services.agent.expand import master_for_response
-from app.services.agent.payload import (
-    merge_patch,
-    parse_create,
-    timezone_ok,
-    to_calendar_event,
-)
+from app.services.agent.payload import merge_patch, parse_create, to_calendar_event
 from app.services.agent.present import present_master
 from app.services.agent.query import (
     collect_events,
@@ -79,7 +73,7 @@ def list_or_search_events(
 ) -> dict | AgentError:
     field_level = fields or FIELD_COMPACT
     if field_level not in VALID_FIELDS:
-        return invalid("fields must be compact, standard, or full.")
+        return invalid("fields must be compact or standard.")
     capped = DEFAULT_LIMIT if limit is None else limit
     if not isinstance(capped, int) or capped < 1 or capped > MAX_LIMIT:
         return invalid(f"limit must be between 1 and {MAX_LIMIT}.")
@@ -155,7 +149,7 @@ def list_or_search_events(
             "truncated": truncated,
         },
     }
-    return _fit_response(body, start_at, capped, rows)
+    return _fit_response(body, start_at)
 
 
 def get_event(
@@ -167,16 +161,15 @@ def get_event(
 ) -> dict | AgentError:
     field_level = fields or FIELD_COMPACT
     if field_level not in VALID_FIELDS:
-        return invalid("fields must be compact, standard, or full.")
+        return invalid("fields must be compact or standard.")
     loaded = _load_live(engine, radicale, event_id)
     if isinstance(loaded, AgentError):
         return loaded
     mapping, source, obj = loaded
-    master = master_for_response(obj)
     return present_master(
         hub_id=mapping.id,
         calendar_id=source["id"],
-        event=master,
+        event=obj.components[0],
         fields=field_level,
     )
 
@@ -192,8 +185,6 @@ def create_event(
         return source
     if parsed["timezone"] is None and not parsed["all_day"]:
         parsed["timezone"] = source["timezone"]
-    elif parsed["timezone"] is not None and not timezone_ok(parsed["timezone"]):
-        return invalid("Enter a valid time zone.")
     mapping_id = str(uuid.uuid4())
     ical_uid = new_uid()
     event = to_calendar_event(parsed, ical_uid)
@@ -235,8 +226,7 @@ def update_event(
     mapping, source, obj = loaded
     if source["kind"] not in WRITABLE_KINDS:
         return invalid("This calendar is read-only.")
-    master = master_for_response(obj)
-    merged = merge_patch(master, payload, source["timezone"])
+    merged = merge_patch(obj.components[0], payload, source["timezone"])
     if isinstance(merged, AgentError):
         return merged
     updated = CalendarObject(
@@ -277,7 +267,7 @@ def delete_event_flow(
     preview = present_master(
         hub_id=mapping.id,
         calendar_id=source["id"],
-        event=master_for_response(obj),
+        event=obj.components[0],
         fields=FIELD_COMPACT,
     )
     if not confirm_token:
@@ -375,24 +365,20 @@ def _audit(action: str, calendar_id: str) -> None:
     )
 
 
-def _fit_response(
-    body: dict[str, Any], start_at: int, capped: int, rows: list[dict]
-) -> dict[str, Any]:
+def _fit_response(body: dict[str, Any], start_at: int) -> dict[str, Any]:
     encoded = json.dumps(body, ensure_ascii=False).encode("utf-8")
     if len(encoded) <= MAX_RESPONSE_BYTES:
         return body
-    events = list(body["events"])
-    while events and len(encoded) > MAX_RESPONSE_BYTES:
-        events.pop()
-        body = {
-            **body,
-            "events": events,
-            "pagination": {
-                **body["pagination"],
-                "count": len(events),
-                "truncated": True,
-                "next_cursor": encode_cursor(start_at + len(events)),
-            },
-        }
-        encoded = json.dumps(body, ensure_ascii=False).encode("utf-8")
+    # Cap rarely hits with limit≤200; drop half the page once if it does.
+    events = body["events"][: max(1, len(body["events"]) // 2)]
+    body = {
+        **body,
+        "events": events,
+        "pagination": {
+            **body["pagination"],
+            "count": len(events),
+            "truncated": True,
+            "next_cursor": encode_cursor(start_at + len(events)),
+        },
+    }
     return body
