@@ -10,13 +10,7 @@ A personal hub that brings your calendar sources together in one place — priva
 copy .env.example .env
 ```
 
-2. Set the required variables in `.env`:
-
-- `HUB_USER` — username for the admin UI and CalDAV clients
-- `HUB_PASSWORD` — password for `HUB_USER`
-- `HUB_INTERNAL_USER` — internal account used between the hub and Radicale
-- `HUB_INTERNAL_PASSWORD` — password for `HUB_INTERNAL_USER`
-- `HUB_SECRET_KEY` — encrypts webhook secrets (keep the real key outside backups)
+2. Edit `.env` and set the values marked there (user, passwords, secret key).
 
 3. Start the stack:
 
