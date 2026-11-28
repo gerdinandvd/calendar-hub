@@ -60,6 +60,7 @@ def test_health_starts_and_stops(tmp_path: Path, monkeypatch) -> None:
             "source_secrets",
             "event_mappings",
             "sync_states",
+            "agent_tokens",
         }
     finally:
         engine.dispose()
@@ -68,6 +69,7 @@ def test_health_starts_and_stops(tmp_path: Path, monkeypatch) -> None:
         "source_secrets",
         "event_mappings",
         "sync_states",
+        "agent_tokens",
     }
 
 
@@ -118,6 +120,11 @@ def test_mounted_routes() -> None:
     assert "/api/calendars" in paths
     assert "/api/caldav-info" in paths
     assert "/api/webhooks/{source_id}" in paths
+    assert "/api/agent/v1/calendars" in paths
+    assert "/api/agent/v1/events" in paths
+    assert "/api/agent/v1/events/{event_id}" in paths
+    assert "/mcp" in paths
+    assert "/tokens" in paths
     assert "/api/sources/{source_id}/rotate-secret" in paths
     assert "/api/sync" in paths
     assert "/sync" in paths

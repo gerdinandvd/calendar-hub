@@ -19,11 +19,9 @@
 		}
 	}
 
-	@open path /api/webhooks /api/webhooks/*
+	@open path /api/webhooks /api/webhooks/* /api/agent /api/agent/* /mcp /mcp/*
 	handle @open {
-		reverse_proxy hub:8000 {
-			header_up -Authorization
-		}
+		reverse_proxy hub:8000
 	}
 
 	handle {

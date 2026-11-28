@@ -83,12 +83,15 @@ def remember(
     ical_uid: str,
     version: str,
     when: str,
-) -> None:
+    *,
+    mapping_id: str | None = None,
+) -> str:
     mapping = load_mapping(session, source_id, external_id)
     if mapping is None:
+        mid = mapping_id or str(uuid.uuid4())
         session.add(
             EventMapping(
-                id=str(uuid.uuid4()),
+                id=mid,
                 source_id=source_id,
                 external_id=external_id,
                 ical_uid=ical_uid,
@@ -97,10 +100,26 @@ def remember(
                 deleted_at=None,
             )
         )
-        return
+        return mid
     mapping.external_version = version
     mapping.last_synced_at = when
     mapping.deleted_at = None
+    return mapping.id
+
+
+def load_mapping_by_id(session: Session, mapping_id: str) -> EventMapping | None:
+    return session.get(EventMapping, mapping_id)
+
+
+def load_mapping_by_uid(
+    session: Session, source_id: str, ical_uid: str
+) -> EventMapping | None:
+    stmt = select(EventMapping).where(
+        EventMapping.source_id == source_id,
+        EventMapping.ical_uid == ical_uid,
+        EventMapping.deleted_at.is_(None),
+    )
+    return session.scalar(stmt)
 
 
 def remember_delete(mapping: EventMapping, when: str) -> None:

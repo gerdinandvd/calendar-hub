@@ -10,6 +10,8 @@ dependencies = [
     "jinja2>=3.1,<4",
     "tzdata>=2024.1",
     "cryptography>=43,<48",
+    "mcp>=1.25,<3",
+    "python-dateutil>=2.9,<3",
 ]
 
 [project.optional-dependencies]
@@ -148,6 +150,7 @@ type = "forbidden"
 source_modules = [
     "app.ui",
     "app.api",
+    "app.mcp",
 ]
 forbidden_modules = [
     "app.sync",
@@ -164,7 +167,7 @@ name = "Layered architecture"
 type = "layers"
 layers = [
     "app.main",
-    "app.api | app.ui",
+    "app.api | app.ui | app.mcp",
     "app.services | app.health | app.i18n",
     "app.sync",
     "app.radicale | app.db",

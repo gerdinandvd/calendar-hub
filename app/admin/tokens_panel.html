@@ -1,0 +1,63 @@
+<div id="tokens-panel">
+<h1>{{ t('nav.tokens') }}</h1>
+<p>{{ t('tokens.intro') }}</p>
+{% if error %}
+<div id="form-error" tabindex="-1" role="alert">{{ error }}</div>
+{% endif %}
+{% if plaintext %}
+<p id="form-notice" tabindex="-1" class="secret">{{ plaintext }}</p>
+<p>{{ t('tokens.once') }}</p>
+{% endif %}
+<form method="post" action="/tokens" hx-post="/tokens" hx-target="#tokens-panel" hx-swap="outerHTML">
+  <label>
+    {{ t('field.name') }}
+    <input name="name" type="text" required maxlength="120" value="{{ draft_name }}">
+  </label>
+  <fieldset>
+    <legend>{{ t('field.scopes') }}</legend>
+    <label>
+      <input type="checkbox" name="scope" value="calendars:read" {% if 'calendars:read' in draft_scopes %}checked{% endif %}>
+      {{ t('scope.calendars_read') }}
+    </label>
+    <label>
+      <input type="checkbox" name="scope" value="calendars:write" {% if 'calendars:write' in draft_scopes %}checked{% endif %}>
+      {{ t('scope.calendars_write') }}
+    </label>
+  </fieldset>
+  <button type="submit">{{ t('tokens.create') }}</button>
+</form>
+{% if not tokens %}
+<p>{{ t('tokens.empty') }}</p>
+{% else %}
+<table>
+  <thead>
+    <tr>
+      <th>{{ t('column.name') }}</th>
+      <th>{{ t('column.prefix') }}</th>
+      <th>{{ t('column.scopes') }}</th>
+      <th>{{ t('column.created') }}</th>
+      <th>{{ t('column.status') }}</th>
+      <th></th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for token in tokens %}
+    <tr>
+      <td>{{ token.name }}</td>
+      <td><code>{{ token.token_prefix }}…</code></td>
+      <td>{{ token.scopes | join(', ') }}</td>
+      <td>{{ token.created_at }}</td>
+      <td>{% if token.revoked_at %}{{ t('tokens.revoked') }}{% else %}{{ t('tokens.active') }}{% endif %}</td>
+      <td>
+        {% if not token.revoked_at %}
+        <form method="post" action="/tokens/{{ token.id }}/revoke" hx-post="/tokens/{{ token.id }}/revoke" hx-target="#tokens-panel" hx-swap="outerHTML">
+          <button type="submit">{{ t('tokens.revoke') }}</button>
+        </form>
+        {% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endif %}
+</div>

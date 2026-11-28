@@ -40,6 +40,14 @@ def _is_webhook(path: str) -> bool:
     return path == "/api/webhooks" or path.startswith("/api/webhooks/")
 
 
+def _is_agent(path: str) -> bool:
+    return path == "/api/agent" or path.startswith("/api/agent/")
+
+
+def _is_mcp(path: str) -> bool:
+    return path == "/mcp" or path.startswith("/mcp/")
+
+
 def _json_content_type(value: str) -> bool:
     media = value.split(";", 1)[0].strip().lower()
     return media == "application/json"
@@ -92,10 +100,15 @@ class MutationGuard:
 
 
 def _reject_mutation(path: str, headers: Mapping[str, str]) -> Response | None:
+    if _is_mcp(path):
+        return None
     if _is_api(path):
         if _is_webhook(path):
             return None
         if not _json_content_type(headers.get("content-type", "")):
+            # Agent DELETE uses query confirm_token and may omit a JSON body.
+            if _is_agent(path) and headers.get("content-length", "0") in {"", "0"}:
+                return None
             return json_error(415, "unsupported_media_type", _STATUS[415][1])
         return None
     if not headers.get("hx-request", "").strip():

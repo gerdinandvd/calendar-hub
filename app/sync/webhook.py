@@ -2,10 +2,8 @@
 
 import hashlib
 import json
-import re
 from dataclasses import dataclass
-from datetime import UTC, date, datetime
-from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+from datetime import UTC, datetime
 
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session
@@ -26,15 +24,15 @@ from app.sync.apply import (
     utc_now,
 )
 from app.sync.ical import CalendarEvent, build_vcalendar
+from app.sync.time_values import (
+    TimeValueError,
+    compact_clock,
+    compact_date,
+    map_rrule,
+    map_status,
+    timezone_ok,
+)
 
-_DATE = re.compile(r"^(\d{4})-(\d{2})-(\d{2})$")
-_CLOCK = re.compile(r"^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?$")
-_RRULE = re.compile(r"^FREQ=(DAILY|WEEKLY|MONTHLY|YEARLY)(;[A-Z0-9-]+=[A-Z0-9,+-]+)*$")
-_STATUSES = {
-    "confirmed": "CONFIRMED",
-    "tentative": "TENTATIVE",
-    "cancelled": "CANCELLED",
-}
 _UPSERT_KEYS = frozenset(
     {
         "id",
@@ -276,37 +274,17 @@ def _required_clock(payload: dict) -> tuple[str, str]:
 
 
 def _date_value(value: str, message: str) -> str:
-    match = _DATE.fullmatch(value)
-    if match is None:
-        raise ParseError(message)
-    year, month, day = (int(part) for part in match.groups())
     try:
-        date(year, month, day)
-    except ValueError:
-        raise ParseError(message) from None
-    return f"{year:04}{month:02}{day:02}"
+        return compact_date(value, message)
+    except TimeValueError as exc:
+        raise ParseError(str(exc)) from None
 
 
 def _clock_value(value: str, message: str) -> str:
-    match = _CLOCK.fullmatch(value)
-    if match is None:
-        raise ParseError(message)
-    year, month, day, hour, minute, second = match.groups()
     try:
-        datetime(
-            int(year),
-            int(month),
-            int(day),
-            int(hour),
-            int(minute),
-            int(second) if second is not None else 0,
-        )
-    except ValueError:
-        raise ParseError(message) from None
-    compact = f"{year}{month}{day}T{hour}{minute}"
-    if second is not None:
-        compact += second
-    return compact
+        return compact_clock(value, message, pad_seconds=False)
+    except TimeValueError as exc:
+        raise ParseError(str(exc)) from None
 
 
 def _zone(payload: dict, source_timezone: str) -> str:
@@ -317,37 +295,27 @@ def _zone(payload: dict, source_timezone: str) -> str:
         if not isinstance(zone, str):
             raise ParseError("Enter a valid time zone.")
         zone = zone.strip()
-    if not _timezone_ok(zone):
+    if not timezone_ok(zone):
         raise ParseError("Enter a valid time zone.")
     return zone
 
 
 def _status(payload: dict) -> str | None:
-    if "status" not in payload or payload["status"] is None:
+    if "status" not in payload:
         return None
-    value = payload["status"]
-    if not isinstance(value, str) or value not in _STATUSES:
-        raise ParseError("The input is invalid.")
-    return _STATUSES[value]
+    try:
+        return map_status(payload["status"])
+    except TimeValueError as exc:
+        raise ParseError(str(exc)) from None
 
 
 def _rrule(payload: dict) -> str | None:
-    if "rrule" not in payload or payload["rrule"] is None:
+    if "rrule" not in payload:
         return None
-    value = payload["rrule"]
-    if not isinstance(value, str) or _RRULE.fullmatch(value) is None:
-        raise ParseError("Enter a valid recurrence rule.")
-    return value
-
-
-def _timezone_ok(value: str) -> bool:
-    if not value:
-        return False
     try:
-        ZoneInfo(value)
-    except (ZoneInfoNotFoundError, ValueError):
-        return False
-    return True
+        return map_rrule(payload["rrule"])
+    except TimeValueError as exc:
+        raise ParseError(str(exc)) from None
 
 
 def _revision(canonical: dict) -> str:
