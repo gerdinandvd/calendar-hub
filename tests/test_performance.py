@@ -3,14 +3,22 @@
 import math
 import threading
 import time
-from pathlib import Path
 
 import pytest
+from tests.helpers import (
+    HX,
+    JSON,
+    Feed,
+    close_feed_server,
+    create_ics_source,
+    make_calendar,
+    make_event,
+    source_state,
+    start_feed_server,
+    trigger_sync,
+)
 
-import test_ics as ics_tests
 from app.sync.runner import wait_for
-
-HX = {"HX-Request": "true"}
 
 
 def _p95(samples: list[float]) -> float:
@@ -19,51 +27,46 @@ def _p95(samples: list[float]) -> float:
     return ordered[rank - 1]
 
 
-def test_list_pages_stay_under_300ms(tmp_path: Path, monkeypatch) -> None:
-    client, _fake = ics_tests._open(tmp_path, monkeypatch)
-    try:
-        for number in range(20):
-            created = client.post(
-                "/api/sources",
-                json={"name": f"Source {number}"},
-                headers=ics_tests.JSON,
-            )
-            assert created.status_code == 201, created.text
-        samples: list[float] = []
-        for path in ("/sources", "/calendars", "/sync"):
-            for _repeat in range(10):
-                started = time.perf_counter()
-                response = client.get(path)
-                samples.append(time.perf_counter() - started)
-                assert response.status_code == 200
-        assert len(samples) == 30
-        assert _p95(samples) < 0.3
-    finally:
-        ics_tests._close(client)
+def test_list_pages_stay_under_300ms(hub_client) -> None:
+    client = hub_client
+    for number in range(20):
+        created = client.post(
+            "/api/sources",
+            json={"name": f"Source {number}"},
+            headers=JSON,
+        )
+        assert created.status_code == 201, created.text
+    samples: list[float] = []
+    for path in ("/sources", "/calendars", "/sync"):
+        for _repeat in range(10):
+            started = time.perf_counter()
+            response = client.get(path)
+            samples.append(time.perf_counter() - started)
+            assert response.status_code == 200
+    assert len(samples) == 30
+    assert _p95(samples) < 0.3
 
 
-def test_sync_start_answers_within_a_second(tmp_path: Path, monkeypatch) -> None:
-    feed = ics_tests.Feed()
+def test_sync_start_answers_within_a_second(hub_client, fake_radicale) -> None:
+    feed = Feed()
     feed.hold = threading.Event()
-    server, base = ics_tests._server(feed)
-    client, _fake = ics_tests._open(tmp_path, monkeypatch)
+    server, base = start_feed_server(feed)
+    client = hub_client
     source_id = ""
     try:
-        feed.default = ics_tests._calendar(*ics_tests._event("one"))
-        created = ics_tests._create(client, f"{base}/feed.ics", name="Feed")
+        feed.default = make_calendar(*make_event("one"))
+        created = create_ics_source(client, f"{base}/feed.ics", name="Feed")
         source_id = created["id"]
-        private = client.post(
-            "/api/sources", json={"name": "Home"}, headers=ics_tests.JSON
-        )
+        private = client.post("/api/sources", json={"name": "Home"}, headers=JSON)
         hook = client.post(
             "/api/sources",
             json={"name": "Hook", "kind": "webhook"},
-            headers=ics_tests.JSON,
+            headers=JSON,
         )
         assert private.status_code == 201
         assert hook.status_code == 201
         started = time.perf_counter()
-        first = ics_tests._sync(client, source_id)
+        first = trigger_sync(client, source_id)
         assert time.perf_counter() - started < 1
         assert first.status_code == 202
         deadline = time.monotonic() + 2
@@ -72,7 +75,7 @@ def test_sync_start_answers_within_a_second(tmp_path: Path, monkeypatch) -> None
         assert len(feed.requests) == 1
         for _repeat in range(9):
             started = time.perf_counter()
-            response = ics_tests._sync(client, source_id)
+            response = trigger_sync(client, source_id)
             assert time.perf_counter() - started < 1
             assert response.status_code == 409
             assert response.json()["error"] == "sync_running"
@@ -85,10 +88,10 @@ def test_sync_start_answers_within_a_second(tmp_path: Path, monkeypatch) -> None
         assert ">running<" in panel.text
         assert len(feed.requests) == 1
 
-        private_sync = ics_tests._sync(client, private.json()["id"])
+        private_sync = trigger_sync(client, private.json()["id"])
         assert private_sync.status_code == 422
         assert private_sync.json()["error"] == "sync_not_supported"
-        hook_sync = ics_tests._sync(client, hook.json()["id"])
+        hook_sync = trigger_sync(client, hook.json()["id"])
         assert hook_sync.status_code == 422
         assert hook_sync.json()["error"] == "sync_not_supported"
     finally:
@@ -96,17 +99,16 @@ def test_sync_start_answers_within_a_second(tmp_path: Path, monkeypatch) -> None
             feed.hold.set()
         if source_id:
             wait_for(client.app.state.engine, source_id)
-        ics_tests._close(client)
-        ics_tests._close_server(server)
+        close_feed_server(server)
 
 
 @pytest.mark.slow
 def test_five_thousand_events_finish_within_ten_minutes(
-    tmp_path: Path, monkeypatch
+    hub_client, fake_radicale
 ) -> None:
-    feed = ics_tests.Feed()
-    server, base = ics_tests._server(feed)
-    client, fake = ics_tests._open(tmp_path, monkeypatch)
+    feed = Feed()
+    server, base = start_feed_server(feed)
+    client, fake = hub_client, fake_radicale
     try:
         lines = ["BEGIN:VCALENDAR", "VERSION:2.0"]
         for number in range(5000):
@@ -123,17 +125,16 @@ def test_five_thousand_events_finish_within_ten_minutes(
             )
         lines.append("END:VCALENDAR")
         feed.default = ("\r\n".join(lines) + "\r\n").encode()
-        created = ics_tests._create(client, f"{base}/feed.ics", name="Large")
+        created = create_ics_source(client, f"{base}/feed.ics", name="Large")
         app_id = id(client.app)
         started = time.perf_counter()
-        assert ics_tests._sync(client, created["id"]).status_code == 202
+        assert trigger_sync(client, created["id"]).status_code == 202
         assert wait_for(client.app.state.engine, created["id"], timeout=600) == "ok"
         assert time.perf_counter() - started < 600
         assert id(client.app) == app_id
         assert len(fake.events) == 5000
-        state = ics_tests._state(client.app.state.engine, created["id"])
+        state = source_state(client.app.state.engine, created["id"])
         assert state["events_seen"] == 5000
         assert state["events_upserted"] == 5000
     finally:
-        ics_tests._close(client)
-        ics_tests._close_server(server)
+        close_feed_server(server)

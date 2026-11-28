@@ -5,10 +5,24 @@ import re
 import socket
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from pathlib import Path
 
-import test_ics as ics_tests
-import test_webhook as webhook_tests
+from tests.helpers import (
+    Feed,
+    close_feed_server,
+    create_ics_source,
+    create_webhook_source,
+    event_path,
+    make_calendar,
+    make_event,
+    send_webhook,
+    source_mappings,
+    source_state,
+    start_feed_server,
+    trigger_sync,
+    webhook_payload,
+    webhook_secret,
+)
+
 from app.i18n import english
 from app.radicale.client import RadicaleClient
 from app.sync.apply import SAVE_MESSAGE
@@ -140,35 +154,35 @@ def _assert_visible(client, source_id: str, name: str, message: str, caplog) -> 
     assert "run_id=" in caplog.text
 
 
-def test_ics_timeout_does_not_fail_another_source(tmp_path: Path, monkeypatch) -> None:
-    feed = ics_tests.Feed()
-    server, base = ics_tests._server(feed)
-    client, fake = ics_tests._open(tmp_path, monkeypatch)
+def test_ics_timeout_does_not_fail_another_source(
+    hub_client, fake_radicale, monkeypatch
+) -> None:
+    feed = Feed()
+    server, base = start_feed_server(feed)
+    client, fake = hub_client, fake_radicale
     try:
-        feed.bodies["/ok.ics"] = ics_tests._calendar(*ics_tests._event("keep"))
-        steady = ics_tests._create(client, f"{base}/ok.ics", name="Steady")
-        assert ics_tests._sync(client, steady["id"]).status_code == 202
+        feed.bodies["/ok.ics"] = make_calendar(*make_event("keep"))
+        steady = create_ics_source(client, f"{base}/ok.ics", name="Steady")
+        assert trigger_sync(client, steady["id"]).status_code == 202
         assert wait_for(client.app.state.engine, steady["id"]) == "ok"
-        before = ics_tests._state(client.app.state.engine, steady["id"])
-        synced = ics_tests._mappings(client.app.state.engine, steady["id"])[0][
+        before = source_state(client.app.state.engine, steady["id"])
+        synced = source_mappings(client.app.state.engine, steady["id"])[0][
             "last_synced_at"
         ]
-        slow = ics_tests._create(client, f"{base}/slow.ics", name="Slow")
+        slow = create_ics_source(client, f"{base}/slow.ics", name="Slow")
         feed.hold = threading.Event()
         monkeypatch.setenv("HUB_ICS_TIMEOUT", "0.2")
-        assert ics_tests._sync(client, slow["id"]).status_code == 202
+        assert trigger_sync(client, slow["id"]).status_code == 202
         assert wait_for(client.app.state.engine, slow["id"], timeout=3) == "error"
-        failed = ics_tests._state(client.app.state.engine, slow["id"])
+        failed = source_state(client.app.state.engine, slow["id"])
         assert failed["last_error_message"] == TIMEOUT_MESSAGE
         assert failed["last_success_at"] is None
-        assert ics_tests._mappings(client.app.state.engine, slow["id"]) == []
-        steady_after = ics_tests._state(client.app.state.engine, steady["id"])
+        assert source_mappings(client.app.state.engine, slow["id"]) == []
+        steady_after = source_state(client.app.state.engine, steady["id"])
         assert steady_after["status"] == "ok"
         assert steady_after["last_success_at"] == before["last_success_at"]
         assert (
-            ics_tests._mappings(client.app.state.engine, steady["id"])[0][
-                "last_synced_at"
-            ]
+            source_mappings(client.app.state.engine, steady["id"])[0]["last_synced_at"]
             == synced
         )
         assert _sync_row(client, slow["id"])["status"] == "error"
@@ -177,43 +191,38 @@ def test_ics_timeout_does_not_fail_another_source(tmp_path: Path, monkeypatch) -
     finally:
         if feed.hold is not None:
             feed.hold.set()
-        ics_tests._close(client)
-        ics_tests._close_server(server)
+        close_feed_server(server)
 
 
 def test_stopped_radicale_on_ics_is_a_sentence_without_a_status(
-    tmp_path: Path, monkeypatch, caplog
+    hub_client, fake_radicale, caplog
 ) -> None:
-    feed = ics_tests.Feed()
-    server, base = ics_tests._server(feed)
-    client, fake = ics_tests._open(tmp_path, monkeypatch)
+    feed = Feed()
+    server, base = start_feed_server(feed)
+    client, fake = hub_client, fake_radicale
     try:
-        feed.default = ics_tests._calendar(*ics_tests._event("keep"))
-        created = ics_tests._create(client, f"{base}/feed.ics", name="Down feed")
-        assert ics_tests._sync(client, created["id"]).status_code == 202
+        feed.default = make_calendar(*make_event("keep"))
+        created = create_ics_source(client, f"{base}/feed.ics", name="Down feed")
+        assert trigger_sync(client, created["id"]).status_code == 202
         assert wait_for(client.app.state.engine, created["id"]) == "ok"
-        before = ics_tests._state(client.app.state.engine, created["id"])
-        synced = ics_tests._mappings(client.app.state.engine, created["id"])[0][
+        before = source_state(client.app.state.engine, created["id"])
+        synced = source_mappings(client.app.state.engine, created["id"])[0][
             "last_synced_at"
         ]
         saved = dict(fake.events)
         _swap(client, _closed_client())
         feed.etag = '"again"'
-        feed.default = ics_tests._calendar(
-            *ics_tests._event("keep"), *ics_tests._event("next")
-        )
+        feed.default = make_calendar(*make_event("keep"), *make_event("next"))
         with caplog.at_level(logging.INFO, logger="app"):
-            assert ics_tests._sync(client, created["id"]).status_code == 202
+            assert trigger_sync(client, created["id"]).status_code == 202
             assert wait_for(client.app.state.engine, created["id"]) == "error"
-        failed = ics_tests._state(client.app.state.engine, created["id"])
+        failed = source_state(client.app.state.engine, created["id"])
         assert failed["last_error_message"] == SAVE_MESSAGE
         assert "status=" not in failed["last_error_message"]
         assert failed["cursor"] == before["cursor"]
         assert failed["last_success_at"] == before["last_success_at"]
         assert (
-            ics_tests._mappings(client.app.state.engine, created["id"])[0][
-                "last_synced_at"
-            ]
+            source_mappings(client.app.state.engine, created["id"])[0]["last_synced_at"]
             == synced
         )
         assert fake.events == saved
@@ -221,64 +230,56 @@ def test_stopped_radicale_on_ics_is_a_sentence_without_a_status(
         assert re.search(r"status=\d{3}", caplog.text) is None
         _assert_visible(client, created["id"], "Down feed", SAVE_MESSAGE, caplog)
     finally:
-        ics_tests._close(client)
-        ics_tests._close_server(server)
+        close_feed_server(server)
 
 
 def test_stopped_radicale_on_webhook_keeps_the_event(
-    tmp_path: Path, monkeypatch, caplog
+    hub_client, fake_radicale, caplog
 ) -> None:
-    client, fake = webhook_tests._open(tmp_path, monkeypatch)
-    try:
-        created = webhook_tests._webhook(client, "Hook")
-        secret = webhook_tests._plain_secret(client.app.state.engine, created["id"])
-        assert (
-            webhook_tests._send(
-                client, created["id"], secret, webhook_tests._payload()
-            ).status_code
-            == 200
+    client, fake = hub_client, fake_radicale
+    created = create_webhook_source(client, "Hook")
+    secret = webhook_secret(client.app.state.engine, created["id"])
+    assert (
+        send_webhook(client, created["id"], secret, webhook_payload()).status_code
+        == 200
+    )
+    success = source_state(client.app.state.engine, created["id"])
+    synced = source_mappings(client.app.state.engine, created["id"])[0][
+        "last_synced_at"
+    ]
+    saved = dict(fake.events)
+    _swap(client, _closed_client())
+    with caplog.at_level(logging.INFO, logger="app"):
+        refused = send_webhook(
+            client,
+            created["id"],
+            secret,
+            webhook_payload(id="extra", summary="Extra"),
         )
-        success = webhook_tests._state(client.app.state.engine, created["id"])
-        synced = webhook_tests._mappings(client.app.state.engine, created["id"])[0][
-            "last_synced_at"
-        ]
-        saved = dict(fake.events)
-        _swap(client, _closed_client())
-        with caplog.at_level(logging.INFO, logger="app"):
-            refused = webhook_tests._send(
-                client,
-                created["id"],
-                secret,
-                webhook_tests._payload(id="extra", summary="Extra"),
-            )
-        assert refused.status_code == 500
-        assert refused.json()["detail"] == english(SAVE_MESSAGE)
-        assert "Traceback" not in refused.text
-        failed = webhook_tests._state(client.app.state.engine, created["id"])
-        assert failed["last_error_message"] == SAVE_MESSAGE
-        assert failed["last_success_at"] == success["last_success_at"]
-        rows = webhook_tests._mappings(client.app.state.engine, created["id"])
-        assert [row["external_id"] for row in rows] == ["ext-1"]
-        assert rows[0]["last_synced_at"] == synced
-        assert fake.events == saved
-        assert "status=none" in caplog.text
-        assert re.search(r"status=\d{3}", caplog.text) is None
-    finally:
-        webhook_tests._close(client)
+    assert refused.status_code == 500
+    assert refused.json()["detail"] == english(SAVE_MESSAGE)
+    assert "Traceback" not in refused.text
+    failed = source_state(client.app.state.engine, created["id"])
+    assert failed["last_error_message"] == SAVE_MESSAGE
+    assert failed["last_success_at"] == success["last_success_at"]
+    rows = source_mappings(client.app.state.engine, created["id"])
+    assert [row["external_id"] for row in rows] == ["ext-1"]
+    assert rows[0]["last_synced_at"] == synced
+    assert fake.events == saved
+    assert "status=none" in caplog.text
+    assert re.search(r"status=\d{3}", caplog.text) is None
 
 
-def test_webhook_process_stop_keeps_the_event(tmp_path: Path, monkeypatch) -> None:
-    client, fake = webhook_tests._open(tmp_path, monkeypatch)
+def test_webhook_process_stop_keeps_the_event(hub_client, fake_radicale) -> None:
+    client, fake = hub_client, fake_radicale
     try:
-        created = webhook_tests._webhook(client, "Hook")
-        secret = webhook_tests._plain_secret(client.app.state.engine, created["id"])
+        created = create_webhook_source(client, "Hook")
+        secret = webhook_secret(client.app.state.engine, created["id"])
         assert (
-            webhook_tests._send(
-                client, created["id"], secret, webhook_tests._payload()
-            ).status_code
+            send_webhook(client, created["id"], secret, webhook_payload()).status_code
             == 200
         )
-        synced = webhook_tests._mappings(client.app.state.engine, created["id"])[0][
+        synced = source_mappings(client.app.state.engine, created["id"])[0][
             "last_synced_at"
         ]
         kept = dict(fake.events)
@@ -287,11 +288,11 @@ def test_webhook_process_stop_keeps_the_event(tmp_path: Path, monkeypatch) -> No
         box: dict = {}
 
         def send() -> None:
-            box["response"] = webhook_tests._send(
+            box["response"] = send_webhook(
                 client,
                 created["id"],
                 secret,
-                webhook_tests._payload(id="extra", summary="Extra"),
+                webhook_payload(id="extra", summary="Extra"),
             )
 
         thread = threading.Thread(target=send)
@@ -305,50 +306,45 @@ def test_webhook_process_stop_keeps_the_event(tmp_path: Path, monkeypatch) -> No
         for path, body in kept.items():
             assert fake.events[path] == body
         assert (
-            webhook_tests._mappings(client.app.state.engine, created["id"])[0][
-                "last_synced_at"
-            ]
+            source_mappings(client.app.state.engine, created["id"])[0]["last_synced_at"]
             == synced
         )
     finally:
         if fake.block_put is not None:
             fake.block_put.set()
-        webhook_tests._close(client)
 
 
 def test_failed_etag_retry_on_ics_keeps_the_first_write(
-    tmp_path: Path, monkeypatch, caplog
+    hub_client, fake_radicale, caplog
 ) -> None:
-    feed = ics_tests.Feed()
-    server, base = ics_tests._server(feed)
-    client, fake = ics_tests._open(tmp_path, monkeypatch)
+    feed = Feed()
+    server, base = start_feed_server(feed)
+    client, fake = hub_client, fake_radicale
     caldav = None
     try:
-        feed.default = ics_tests._calendar(*ics_tests._event("keep"))
-        created = ics_tests._create(client, f"{base}/feed.ics", name="Feed")
-        assert ics_tests._sync(client, created["id"]).status_code == 202
+        feed.default = make_calendar(*make_event("keep"))
+        created = create_ics_source(client, f"{base}/feed.ics", name="Feed")
+        assert trigger_sync(client, created["id"]).status_code == 202
         assert wait_for(client.app.state.engine, created["id"]) == "ok"
-        before = ics_tests._state(client.app.state.engine, created["id"])
-        synced = ics_tests._mappings(client.app.state.engine, created["id"])[0][
+        before = source_state(client.app.state.engine, created["id"])
+        synced = source_mappings(client.app.state.engine, created["id"])[0][
             "last_synced_at"
         ]
         store = _Store(fake.events, accept=1)
         caldav, radicale = _serve(store)
         _swap(client, radicale)
         feed.etag = '"next"'
-        feed.default = ics_tests._calendar(
-            *ics_tests._event("added"), *ics_tests._event("blocked")
-        )
+        feed.default = make_calendar(*make_event("added"), *make_event("blocked"))
         with caplog.at_level(logging.INFO, logger="app"):
-            assert ics_tests._sync(client, created["id"]).status_code == 202
+            assert trigger_sync(client, created["id"]).status_code == 202
             assert wait_for(client.app.state.engine, created["id"]) == "error"
-        failed = ics_tests._state(client.app.state.engine, created["id"])
+        failed = source_state(client.app.state.engine, created["id"])
         assert failed["last_error_message"] == SAVE_MESSAGE
         assert failed["cursor"] == before["cursor"]
         assert failed["last_success_at"] == before["last_success_at"]
         rows = {
             row["external_id"]: row
-            for row in ics_tests._mappings(client.app.state.engine, created["id"])
+            for row in source_mappings(client.app.state.engine, created["id"])
         }
         assert rows["keep"]["last_synced_at"] == synced
         assert "added" in rows
@@ -356,7 +352,7 @@ def test_failed_etag_retry_on_ics_keeps_the_first_write(
         assert store.deletes == []
         collection = created["collection_path"]
         mappings = list(rows.values())
-        assert ics_tests._event_path(collection, mappings, "added") in store.events
+        assert event_path(collection, mappings, "added") in store.events
         assert "radicale_error method=PUT status=500" in caplog.text
         assert "Traceback" not in caplog.text
         assert f"source_id={created['id']}" in caplog.text
@@ -364,44 +360,41 @@ def test_failed_etag_retry_on_ics_keeps_the_first_write(
     finally:
         if caldav is not None:
             _close_server(caldav)
-        ics_tests._close(client)
-        ics_tests._close_server(server)
+        close_feed_server(server)
 
 
 def test_failed_etag_retry_on_webhook_keeps_the_event(
-    tmp_path: Path, monkeypatch, caplog
+    hub_client, fake_radicale, caplog
 ) -> None:
-    client, fake = webhook_tests._open(tmp_path, monkeypatch)
+    client, fake = hub_client, fake_radicale
     caldav = None
     try:
-        created = webhook_tests._webhook(client, "Hook")
-        secret = webhook_tests._plain_secret(client.app.state.engine, created["id"])
+        created = create_webhook_source(client, "Hook")
+        secret = webhook_secret(client.app.state.engine, created["id"])
         assert (
-            webhook_tests._send(
-                client, created["id"], secret, webhook_tests._payload()
-            ).status_code
+            send_webhook(client, created["id"], secret, webhook_payload()).status_code
             == 200
         )
-        success = webhook_tests._state(client.app.state.engine, created["id"])
-        synced = webhook_tests._mappings(client.app.state.engine, created["id"])[0][
+        success = source_state(client.app.state.engine, created["id"])
+        synced = source_mappings(client.app.state.engine, created["id"])[0][
             "last_synced_at"
         ]
         store = _Store(fake.events, accept=0)
         caldav, radicale = _serve(store)
         _swap(client, radicale)
         with caplog.at_level(logging.INFO, logger="app"):
-            refused = webhook_tests._send(
+            refused = send_webhook(
                 client,
                 created["id"],
                 secret,
-                webhook_tests._payload(id="extra", summary="Extra"),
+                webhook_payload(id="extra", summary="Extra"),
             )
         assert refused.status_code == 500
         assert refused.json()["detail"] == english(SAVE_MESSAGE)
         assert "Traceback" not in refused.text
-        failed = webhook_tests._state(client.app.state.engine, created["id"])
+        failed = source_state(client.app.state.engine, created["id"])
         assert failed["last_success_at"] == success["last_success_at"]
-        rows = webhook_tests._mappings(client.app.state.engine, created["id"])
+        rows = source_mappings(client.app.state.engine, created["id"])
         assert [row["external_id"] for row in rows] == ["ext-1"]
         assert rows[0]["last_synced_at"] == synced
         assert store.puts == 0
@@ -411,4 +404,3 @@ def test_failed_etag_retry_on_webhook_keeps_the_event(
     finally:
         if caldav is not None:
             _close_server(caldav)
-        webhook_tests._close(client)
